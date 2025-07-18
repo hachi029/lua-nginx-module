@@ -19,6 +19,13 @@ static u_char *ngx_http_lua_log_init_worker_error(ngx_log_t *log,
     u_char *buf, size_t len);
 
 
+/**
+ *     
+ * init process
+ * 
+ * 在每个 worker进程的初始化过程会调用所有模块的init_process函数
+ * 
+ */
 ngx_int_t
 ngx_http_lua_init_worker(ngx_cycle_t *cycle)
 {

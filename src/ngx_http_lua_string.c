@@ -37,6 +37,9 @@ static int ngx_http_lua_ngx_hmac_sha1(lua_State *L);
 #endif
 
 
+/**
+ * string相关api注入
+ */
 void
 ngx_http_lua_inject_string_api(lua_State *L)
 {

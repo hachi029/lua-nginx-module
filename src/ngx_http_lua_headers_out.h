@@ -13,6 +13,9 @@
 
 
 #if (NGX_DARWIN)
+/**
+ * 用于封装调用参数ngx.header.HEADER 设置
+ */
 typedef struct {
     ngx_http_request_t   *r;
     const char           *key_data;

@@ -42,6 +42,9 @@ static ngx_int_t ngx_http_set_location_header(ngx_http_request_t *r,
     ngx_http_lua_header_val_t *hv, ngx_str_t *value);
 
 
+/**
+ * 当使用ngx.header.HEADER api设置响应头时，对于特定的响应头，执行handler进行一些额外处理
+ */
 static ngx_http_lua_set_header_t  ngx_http_lua_set_handlers[] = {
 
     { ngx_string("Server"),
@@ -248,6 +251,9 @@ new_header:
 }
 
 
+/**
+ * 当使用ngx.header.HEADER api设置响应头Location时，执行的回调
+ */
 static ngx_int_t
 ngx_http_set_location_header(ngx_http_request_t *r,
     ngx_http_lua_header_val_t *hv, ngx_str_t *value)
@@ -274,6 +280,10 @@ ngx_http_set_location_header(ngx_http_request_t *r,
 }
 
 
+/**
+ * 当使用ngx.header.HEADER api设置响应头时，对于特定的响应头，执行的回调
+ * 
+ */
 static ngx_int_t
 ngx_http_set_builtin_header(ngx_http_request_t *r,
     ngx_http_lua_header_val_t *hv, ngx_str_t *value)
@@ -548,6 +558,11 @@ ngx_http_clear_builtin_header(ngx_http_request_t *r,
 }
 
 
+/**
+ * 设置响应头
+ * key: 响应头的key
+ * value: 响应头的值
+ */
 ngx_int_t
 ngx_http_lua_set_output_header(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx,
     ngx_str_t key, ngx_str_t value, unsigned override)
@@ -559,14 +574,17 @@ ngx_http_lua_set_output_header(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx,
 
     dd("set header value: %.*s", (int) value.len, value.data);
 
+    //对key进行转义
     if (ngx_http_lua_copy_escaped_header(r, &key, 1) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //对value进行转义
     if (ngx_http_lua_copy_escaped_header(r, &value, 0) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //计算key的hash
     hv.hash = ngx_hash_key_lc(key.data, key.len);
     hv.key = key;
 
@@ -575,17 +593,19 @@ ngx_http_lua_set_output_header(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx,
     hv.handler = ngx_http_set_header;
 
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
-    hash = &lmcf->builtin_headers_out;
+    hash = &lmcf->builtin_headers_out;      //ngx_http_lua_set_handlers
     lsh = ngx_http_lua_hash_find_lc(hash, hv.hash, hv.key.data, hv.key.len);
     if (lsh) {
         dd("Matched handler: %s %s", lsh->name.data, hv.key.data);
         hv.offset = lsh->offset;
         hv.handler = lsh->handler;
         if (hv.handler == ngx_http_set_content_type_header) {
+            //标记 是否通过ngx.header.HEADER api重新设置了 Content-Type 响应头
             ctx->mime_set = 1;
         }
     }
 
+    //执行设值回调。参考 ngx_http_lua_set_handlers
     return hv.handler(r, &hv, &value);
 }
 

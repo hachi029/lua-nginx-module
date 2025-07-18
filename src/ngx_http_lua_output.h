@@ -23,6 +23,9 @@ ngx_int_t ngx_http_lua_flush_resume_helper(ngx_http_request_t *r,
     ngx_http_lua_ctx_t *ctx);
 
 
+/**
+ * number类型转字符串后的最大长度
+ */
 /* Get the maximum possible length, not the actual length */
 static ngx_inline size_t
 ngx_http_lua_get_num_len(lua_State *L, int idx)
@@ -38,18 +41,24 @@ ngx_http_lua_get_num_len(lua_State *L, int idx)
 }
 
 
+/**
+ * 将idx位置的num转化为string，写入到dst指定的位置。dst会根据写入的长度向后移动
+ * 返回新的dst值
+ */
 static ngx_inline u_char *
 ngx_http_lua_write_num(lua_State *L, int idx, u_char *dst)
 {
     double     num;
     int        n;
 
+    //转为num
     num = (double) lua_tonumber(L, idx);
     /*
      * luajit format number with only 14 significant digits.
      * To be consistent with lujit, don't use (double) (long) below
      * or integer greater than 99,999,999,999,999 will different from luajit.
      */
+    //格式化输出
     if (num == (double) (int32_t) num) {
         dst = ngx_snprintf(dst, NGX_INT64_LEN, "%D", (int32_t) num);
 

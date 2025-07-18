@@ -195,6 +195,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
         return rc;
     }
 
+    //如果配置了需要读取请求体，但还没有读取
     if (llcf->force_read_body && !ctx->read_body_done) {
         r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;

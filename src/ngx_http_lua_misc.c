@@ -18,6 +18,7 @@
 static int ngx_http_lua_ngx_req_is_internal(lua_State *L);
 
 
+//ngx.req.is_internal
 void
 ngx_http_lua_inject_req_misc_api(lua_State *L)
 {
@@ -26,6 +27,10 @@ ngx_http_lua_inject_req_misc_api(lua_State *L)
 }
 
 
+/**
+ * ngx.req.is_internal
+ * 只是读取了r->internal
+ */
 static int
 ngx_http_lua_ngx_req_is_internal(lua_State *L)
 {
@@ -41,6 +46,9 @@ ngx_http_lua_ngx_req_is_internal(lua_State *L)
 }
 
 
+/**
+ * 读取 ngx.status
+ */
 int
 ngx_http_lua_ffi_get_resp_status(ngx_http_request_t *r)
 {
@@ -63,16 +71,21 @@ ngx_http_lua_ffi_get_resp_status(ngx_http_request_t *r)
 }
 
 
+/**
+ * 设置 ngx.status
+ */
 int
 ngx_http_lua_ffi_set_resp_status_and_reason(ngx_http_request_t *r, int status,
     const char *reason, size_t reason_len)
 {
     u_char *buf;
 
+    //如果是fake request
     if (r->connection->fd == (ngx_socket_t) -1) {
         return NGX_HTTP_LUA_FFI_BAD_CONTEXT;
     }
 
+    //如果header已经发送了
     if (r->header_sent) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "attempt to set ngx.status after sending out "
@@ -88,6 +101,7 @@ ngx_http_lua_ffi_set_resp_status_and_reason(ngx_http_request_t *r, int status,
         return NGX_DECLINED;
     }
 
+    //直接设置headers_out.status
     r->headers_out.status = status;
 
     if (r->err_status) {
@@ -129,6 +143,9 @@ ngx_http_lua_ffi_set_resp_status(ngx_http_request_t *r, int status)
 }
 
 
+/**
+ * ngx.req.is_internal
+ */
 int
 ngx_http_lua_ffi_req_is_internal(ngx_http_request_t *r)
 {
@@ -151,6 +168,10 @@ ngx_http_lua_ffi_is_subrequest(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.headers_sent
+ * 响应头是否已经发送了  r->header_sent
+ */
 int
 ngx_http_lua_ffi_headers_sent(ngx_http_request_t *r)
 {

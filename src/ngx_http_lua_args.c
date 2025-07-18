@@ -19,6 +19,9 @@ static int ngx_http_lua_ngx_req_set_uri_args(lua_State *L);
 static int ngx_http_lua_ngx_req_get_post_args(lua_State *L);
 
 
+/**
+ * uri 编码，如果dst为NULL，只是计算需要转义的字符个数
+ */
 uintptr_t
 ngx_http_lua_escape_args(u_char *dst, u_char *src, size_t size)
 {
@@ -81,6 +84,12 @@ ngx_http_lua_escape_args(u_char *dst, u_char *src, size_t size)
 }
 
 
+/**
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#ngxreqset_uri_args
+ * 
+ * ngx.req.set_uri_args(args) args可以是table，也可以是字符串
+ * 
+ */
 static int
 ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
 {
@@ -91,6 +100,7 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
     u_char                      *p;
     uintptr_t                    escape;
 
+    //只接受一个参数
     if (lua_gettop(L) != 1) {
         return luaL_error(L, "expecting 1 argument but seen %d",
                           lua_gettop(L));
@@ -101,10 +111,11 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
         return luaL_error(L, "no request object found");
     }
 
+    //r->connection->fd  == -1 ?
     ngx_http_lua_check_fake_request(L, r);
 
     switch (lua_type(L, 1)) {
-    case LUA_TNUMBER:
+    case LUA_TNUMBER:       //number
         p = (u_char *) lua_tolstring(L, 1, &len);
 
         args.data = ngx_palloc(r->pool, len);
@@ -117,11 +128,13 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
         args.len = len;
         break;
 
-    case LUA_TSTRING:
+    case LUA_TSTRING:       //string
         p = (u_char *) lua_tolstring(L, 1, &len);
 
+        //先计算需要转义的字符个数
         escape = ngx_http_lua_escape_args(NULL, p, len);
         if (escape > 0) {
+            //有需要转义的字符
             args.len = len + 2 * escape;
             args.data = ngx_palloc(r->pool, args.len);
             if (args.data == NULL) {
@@ -131,6 +144,7 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
             ngx_http_lua_escape_args(args.data, p, len);
 
         } else {
+            //无需要转义的字符
             args.data = ngx_palloc(r->pool, len);
             if (args.data == NULL) {
                 return luaL_error(L, "no memory");
@@ -143,7 +157,7 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
 
         break;
 
-    case LUA_TTABLE:
+    case LUA_TTABLE:    //table
         ngx_http_lua_process_args_option(r, L, 1, &args);
 
         dd("args: %.*s", (int) args.len, args.data);
@@ -158,6 +172,7 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
 
     dd("args: %.*s", (int) args.len, args.data);
 
+    //重置r->args指针
     r->args.data = args.data;
     r->args.len = args.len;
 
@@ -167,6 +182,9 @@ ngx_http_lua_ngx_req_set_uri_args(lua_State *L)
 }
 
 
+/**
+ * args, err = ngx.req.get_post_args(max_args?)
+ */
 static int
 ngx_http_lua_ngx_req_get_post_args(lua_State *L)
 {
@@ -180,8 +198,10 @@ ngx_http_lua_ngx_req_get_post_args(lua_State *L)
     int                          n;
     int                          max;
 
+    //参数个数
     n = lua_gettop(L);
 
+    //只能是0或1个参数
     if (n != 0 && n != 1) {
         return luaL_error(L, "expecting 0 or 1 arguments but seen %d", n);
     }
@@ -201,22 +221,27 @@ ngx_http_lua_ngx_req_get_post_args(lua_State *L)
 
     ngx_http_lua_check_fake_request(L, r);
 
+    //请求体已经被丢弃
     if (r->discard_body) {
+        //创建一个空表
         lua_createtable(L, 0, 0);
         return 1;
     }
 
+    //未读取请求体
     if (r->request_body == NULL) {
         return luaL_error(L, "no request body found; "
                           "maybe you should turn on lua_need_request_body?");
     }
 
+    //请求体太大被读入了临时文件
     if (r->request_body->temp_file) {
         lua_pushnil(L);
         lua_pushliteral(L, "request body in temp file not supported");
         return 2;
     }
 
+    //没有请求体
     if (r->request_body->bufs == NULL) {
         lua_createtable(L, 0, 0);
         return 1;
@@ -225,6 +250,7 @@ ngx_http_lua_ngx_req_get_post_args(lua_State *L)
     /* we copy r->request_body->bufs over to buf to simplify
      * unescaping query arg keys and values */
 
+     //计算请求体长度
     len = 0;
     for (cl = r->request_body->bufs; cl; cl = cl->next) {
         len += cl->buf->last - cl->buf->pos;
@@ -237,6 +263,7 @@ ngx_http_lua_ngx_req_get_post_args(lua_State *L)
         return 1;
     }
 
+    //申请内存
     buf = ngx_palloc(r->pool, len);
     if (buf == NULL) {
         return luaL_error(L, "no memory");
@@ -244,6 +271,7 @@ ngx_http_lua_ngx_req_get_post_args(lua_State *L)
 
     lua_createtable(L, 0, 4);
 
+    //将请求体拷贝到buf
     p = buf;
     for (cl = r->request_body->bufs; cl; cl = cl->next) {
         p = ngx_copy(p, cl->buf->pos, cl->buf->last - cl->buf->pos);
@@ -253,14 +281,22 @@ ngx_http_lua_ngx_req_get_post_args(lua_State *L)
 
     last = buf + len;
 
+    //解析为table
     retval = ngx_http_lua_parse_args(L, buf, last, max);
 
+    //释放内存
     ngx_pfree(r->pool, buf);
 
     return retval;
 }
 
 
+/**
+ * 解析args字符串 a=b&c=d 为lua table
+ * buf: 字符串起始位置
+ * last: 字符串结束位置
+ * max: 解析的最大数量
+ */
 int
 ngx_http_lua_parse_args(lua_State *L, u_char *buf, u_char *last, int max)
 {
@@ -284,6 +320,7 @@ ngx_http_lua_parse_args(lua_State *L, u_char *buf, u_char *last, int max)
 
             src = q; dst = q;
 
+            //对key进行uri解码
             ngx_http_lua_unescape_uri(&dst, &src, p - q,
                                       NGX_UNESCAPE_URI_COMPONENT);
 
@@ -302,6 +339,7 @@ ngx_http_lua_parse_args(lua_State *L, u_char *buf, u_char *last, int max)
             /* reached the end of a key or a value, just save it */
             src = q; dst = q;
 
+            //对key或value进行uri解码
             ngx_http_lua_unescape_uri(&dst, &src, p - q,
                                       NGX_UNESCAPE_URI_COMPONENT);
 
@@ -391,6 +429,9 @@ ngx_http_lua_parse_args(lua_State *L, u_char *buf, u_char *last, int max)
 }
 
 
+/**
+ * 注入api ngx.req.set_uri_args/ngx.req.get_post_args
+ */
 void
 ngx_http_lua_inject_req_args_api(lua_State *L)
 {
@@ -409,6 +450,9 @@ ngx_http_lua_ffi_req_get_querystring_len(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.req.get_uri_args 会调用此方法， 结果作为ngx_http_lua_ffi_req_get_uri_args方法的传参
+ */
 int
 ngx_http_lua_ffi_req_get_uri_args_count(ngx_http_request_t *r, int max,
     int *truncated)
@@ -429,6 +473,7 @@ ngx_http_lua_ffi_req_get_uri_args_count(ngx_http_request_t *r, int max,
     last = r->args.data + r->args.len;
     count = 0;
 
+    //计算&字符的个数
     for (p = r->args.data; p != last; p++) {
         if (*p == '&') {
             if (count == 0) {
@@ -440,6 +485,7 @@ ngx_http_lua_ffi_req_get_uri_args_count(ngx_http_request_t *r, int max,
         }
     }
 
+    //如果count>max, count被置为max， 且truncated被置为1
     if (count) {
         if (max > 0 && count > max) {
             count = max;
@@ -459,6 +505,12 @@ ngx_http_lua_ffi_req_get_uri_args_count(ngx_http_request_t *r, int max,
 }
 
 
+/**
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#ngxreqget_uri_args
+ * 
+ * count为args参数个数
+ * 返回实际的args参数个数
+ */
 int
 ngx_http_lua_ffi_req_get_uri_args(ngx_http_request_t *r, u_char *buf,
     ngx_http_lua_ffi_table_elt_t *out, int count)
@@ -471,6 +523,7 @@ ngx_http_lua_ffi_req_get_uri_args(ngx_http_request_t *r, u_char *buf,
         return NGX_OK;
     }
 
+    //先将args参数拷贝到传入的内存。后边解析出来的key和value都指向的是新复制的内存
     ngx_memcpy(buf, r->args.data, r->args.len);
 
     i = 0;
@@ -484,6 +537,7 @@ ngx_http_lua_ffi_req_get_uri_args(ngx_http_request_t *r, u_char *buf,
 
             src = q; dst = q;
 
+            //对key进行uri解码
             ngx_http_lua_unescape_uri(&dst, &src, p - q,
                                       NGX_UNESCAPE_URI_COMPONENT);
 
@@ -502,6 +556,7 @@ ngx_http_lua_ffi_req_get_uri_args(ngx_http_request_t *r, u_char *buf,
             /* reached the end of a key or a value, just save it */
             src = q; dst = q;
 
+            //对value进行uri解码
             ngx_http_lua_unescape_uri(&dst, &src, p - q,
                                       NGX_UNESCAPE_URI_COMPONENT);
 
@@ -518,6 +573,7 @@ ngx_http_lua_ffi_req_get_uri_args(ngx_http_request_t *r, u_char *buf,
                 }
 
             } else {
+                //没有值的参数
                 /* the current parsing pair takes no value,
                  * just push the value "true" */
                 dd("pushing boolean true");
@@ -530,6 +586,7 @@ ngx_http_lua_ffi_req_get_uri_args(ngx_http_request_t *r, u_char *buf,
                 }
             }
 
+            //达到获取的参数个数限制
             if (i == count) {
                 return i;
             }

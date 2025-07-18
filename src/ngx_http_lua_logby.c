@@ -63,6 +63,9 @@ ngx_http_lua_log_by_lua_env(lua_State *L, ngx_http_request_t *r)
 }
 
 
+/**
+ * 如果配置了log_by_lua指令， 安装一个LOG_PHASE的handler
+ * */
 ngx_int_t
 ngx_http_lua_log_handler(ngx_http_request_t *r)
 {

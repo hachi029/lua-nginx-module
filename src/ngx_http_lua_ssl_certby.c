@@ -87,6 +87,9 @@ ngx_http_lua_ssl_cert_handler_inline(ngx_http_request_t *r,
 }
 
 
+/**
+ * ssl_certificate_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_ssl_cert_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -106,6 +109,9 @@ ngx_http_lua_ssl_cert_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * ssl_certificate_by_lua_file/ssl_certificate_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_ssl_cert_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)

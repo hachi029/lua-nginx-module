@@ -490,6 +490,9 @@ ngx_http_lua_regex_jit_compile(ngx_http_lua_regex_t *re, int flags,
 #endif
 
 
+/**
+ * 添加在cf->pool上的清理函数
+ */
 #if (NGX_PCRE2)
 void
 ngx_http_lua_regex_cleanup(void *data)

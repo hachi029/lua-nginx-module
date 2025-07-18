@@ -87,6 +87,10 @@ enum {
 };
 
 
+/**
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#ngxlocationcapture
+ * 
+ */
 /* ngx.location.capture is just a thin wrapper around
  * ngx.location.capture_multi */
 static int
@@ -94,8 +98,10 @@ ngx_http_lua_ngx_location_capture(lua_State *L)
 {
     int                 n;
 
+    //栈中元素的个数
     n = lua_gettop(L);
 
+    //只能有一个或两个参数  syntax: res = ngx.location.capture(uri, options?)
     if (n != 1 && n != 2) {
         return luaL_error(L, "expecting one or two arguments");
     }
@@ -103,21 +109,31 @@ ngx_http_lua_ngx_location_capture(lua_State *L)
     lua_createtable(L, n, 0); /* uri opts? table  */
     lua_insert(L, 1); /* table uri opts? */
     if (n == 1) { /* table uri */
+        //{uri='/abc'}
         lua_rawseti(L, 1, 1); /* table */
 
     } else { /* table uri opts */
+        //{uri='abc', opts='opts'}
         lua_rawseti(L, 1, 2); /* table uri */
         lua_rawseti(L, 1, 1); /* table */
     }
 
+    //{{uri='abc', opts='opts'}}
     lua_createtable(L, 1, 0); /* table table' */
     lua_insert(L, 1);   /* table' table */
     lua_rawseti(L, 1, 1); /* table' */
 
+    //调用capture_multi
     return ngx_http_lua_ngx_location_capture_multi(L);
 }
 
 
+/**
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#ngxlocationcapture_multi
+ * 
+ * syntax: res1, res2, ... = ngx.location.capture_multi({ {uri, options?}, {uri, options?}, ... })
+ * 
+ */
 static int
 ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 {
@@ -156,13 +172,16 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
     ngx_http_lua_post_subrequest_data_t      *psr_data;
 
+    //只能有一个参数
     n = lua_gettop(L);
     if (n != 1) {
         return luaL_error(L, "only one argument is expected, but got %d", n);
     }
 
+    //参数类型为table
     luaL_checktype(L, 1, LUA_TTABLE);
 
+    //获取第一个参数的元素个数
     nsubreqs = lua_objlen(L, 1);
     if (nsubreqs == 0) {
         return luaL_error(L, "at least one subrequest should be specified");
@@ -191,11 +210,13 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
                    "lua location capture, uri:\"%V\" c:%ud", &r->uri,
                    r->main->count);
 
+    //nsubreqs为子请求数量
     sr_statuses_len = nsubreqs * sizeof(ngx_int_t);
     sr_headers_len  = nsubreqs * sizeof(ngx_http_headers_out_t *);
     sr_bodies_len   = nsubreqs * sizeof(ngx_str_t);
     sr_flags_len    = nsubreqs * sizeof(uint8_t);
 
+    //申请用于存放子请求响应的内存空间
     p = ngx_pcalloc(r->pool, sr_statuses_len + sr_headers_len +
                     sr_bodies_len + sr_flags_len);
 
@@ -203,6 +224,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
         return luaL_error(L, "no memory");
     }
 
+    //初始化coctx子请求相关指针
     coctx->sr_statuses = (void *) p;
     p += sr_statuses_len;
 
@@ -214,6 +236,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
     coctx->sr_flags = (void *) p;
 
+    //子请求数量
     coctx->nsubreqs = nsubreqs;
 
     coctx->pending_subreqs = 0;
@@ -221,9 +244,11 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
     extra_vars = NULL;
     extra_headers = NULL;
 
+    //遍历发起每个子请求
     for (index = 0; index < nsubreqs; index++) {
         coctx->pending_subreqs++;
 
+        //将第index个表放入栈顶
         lua_rawgeti(L, 1, index + 1);
         if (lua_isnil(L, -1)) {
             return luaL_error(L, "only array-like tables are allowed");
@@ -231,19 +256,24 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
         dd("queries query: top %d", lua_gettop(L));
 
+        //必须是table类型
         if (lua_type(L, -1) != LUA_TTABLE) {
             return luaL_error(L, "the query argument %d is not a table, "
                               "but a %s",
                               index, lua_typename(L, lua_type(L, -1)));
         }
 
+        //获取table元素个数
         nargs = lua_objlen(L, -1);
 
+        //ngx.location.capture(uri, options?) 
+        //只允许1个或2个参数
         if (nargs != 1 && nargs != 2) {
             return luaL_error(L, "query argument %d expecting one or "
                               "two arguments", index);
         }
 
+        //uri
         lua_rawgeti(L, 2, 1); /* queries query uri */
 
         dd("queries query uri: %d", lua_gettop(L));
@@ -252,6 +282,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
         body = NULL;
 
+        //初始化 extra_args/extra_vars/extra_headers
         ngx_str_null(&extra_args);
 
         if (extra_vars != NULL) {
@@ -268,13 +299,16 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
         custom_ctx = 0;
 
+        //(uri, options) 
         if (nargs == 2) {
             /* check out the options table */
 
+            //options
             lua_rawgeti(L, 2, 2); /* queries query uri opts */
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            //options 也应该是一个表
             if (lua_type(L, 4) != LUA_TTABLE) {
                 return luaL_error(L, "expecting table as the 2nd argument for "
                                   "subrequest %d, but got %s", index,
@@ -283,14 +317,18 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            /*------------------- 处理options.args参数--------------------- */
             /* check the args option */
 
+            //options.args
             lua_getfield(L, 4, "args");
 
             type = lua_type(L, -1);
 
+            //options.args的类型
             switch (type) {
             case LUA_TTABLE:
+                //将args序列化为string, 存入extra_args
                 ngx_http_lua_process_args_option(r, L, -1, &extra_args);
                 break;
 
@@ -313,12 +351,14 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            /*------------------- 处理options.vars参数--------------------- */
             /* check the vars option */
 
             lua_getfield(L, 4, "vars");
 
             switch (lua_type(L, -1)) {
             case LUA_TTABLE:
+                //将table转换成一个元素类型为ngx_keyval_t的动态数组extra_vars
                 ngx_http_lua_process_keyval_option(r, L, -1, &extra_vars);
 
                 dd("post process vars top: %d", lua_gettop(L));
@@ -336,12 +376,14 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            /*------------------- 处理options.headers参数--------------------- */
             /* check the headers option */
 
             lua_getfield(L, 4, "headers");
 
             switch (lua_type(L, -1)) {
             case LUA_TTABLE:
+                //将table转换成一个元素类型为ngx_keyval_t的动态数组extra_headers
                 ngx_http_lua_process_keyval_option(r, L, -1, &extra_headers);
 
                 dd("post process vars top: %d", lua_gettop(L));
@@ -359,6 +401,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+             /*------------------- 处理options.share_all_vars参数--------------------- */
             /* check the share_all_vars option */
 
             lua_getfield(L, 4, "share_all_vars");
@@ -369,6 +412,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
                 break;
 
             case LUA_TBOOLEAN:
+                //只能是一个boolean值
                 if (lua_toboolean(L, -1)) {
                     vars_action |= NGX_HTTP_LUA_SHARE_ALL_VARS;
                 }
@@ -382,6 +426,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            /*------------------- 处理options.copy_all_vars参数--------------------- */
             /* check the copy_all_vars option */
 
             lua_getfield(L, 4, "copy_all_vars");
@@ -392,6 +437,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
                 break;
 
             case LUA_TBOOLEAN:
+                //只能是一个boolean值
                 if (lua_toboolean(L, -1)) {
                     vars_action |= NGX_HTTP_LUA_COPY_ALL_VARS;
                 }
@@ -405,6 +451,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            /*------------------- 处理options.forward_body参数--------------------- */
             /* check the "forward_body" option */
 
             lua_getfield(L, 4, "always_forward_body");
@@ -413,16 +460,19 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("always forward body: %d", always_forward_body);
 
+            /*------------------- 处理options.method参数--------------------- */
             /* check the "method" option */
 
             lua_getfield(L, 4, "method");
 
             type = lua_type(L, -1);
 
+            //默认是GET
             if (type == LUA_TNIL) {
                 method = NGX_HTTP_GET;
 
             } else {
+                //只能是number类型
                 if (type != LUA_TNUMBER) {
                     return luaL_error(L, "Bad http request method");
                 }
@@ -434,6 +484,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts: %d", lua_gettop(L));
 
+            /*------------------- 处理options.ctx参数--------------------- */
             /* check the "ctx" option */
 
             lua_getfield(L, 4, "ctx");
@@ -441,12 +492,14 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
             type = lua_type(L, -1);
 
             if (type != LUA_TNIL) {
+                //必须是table
                 if (type != LUA_TTABLE) {
                     return luaL_error(L, "Bad ctx option value type %s, "
                                       "expected a Lua table",
                                       lua_typename(L, type));
                 }
 
+                //标识传入了自定义的table作为子请求的ngx.ctx
                 custom_ctx = 1;
 
             } else {
@@ -455,6 +508,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
             dd("queries query uri opts ctx?: %d", lua_gettop(L));
 
+            /*------------------- 处理options.body参数--------------------- */
             /* check the "body" option */
 
             lua_getfield(L, 4, "body");
@@ -462,33 +516,40 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
             type = lua_type(L, -1);
 
             if (type != LUA_TNIL) {
+                //只支持string或number
                 if (type != LUA_TSTRING && type != LUA_TNUMBER) {
                     return luaL_error(L, "Bad http request body");
                 }
 
+                //创建ngx_http_request_body_t结构体
                 body = ngx_pcalloc(r->pool, sizeof(ngx_http_request_body_t));
 
                 if (body == NULL) {
                     return luaL_error(L, "no memory");
                 }
 
+                //body参数转为string
                 q = (u_char *) lua_tolstring(L, -1, &len);
 
                 dd("request body: [%.*s]", (int) len, q);
 
                 if (len) {
+                    //创建ngx_buf_t
                     b = ngx_create_temp_buf(r->pool, len);
                     if (b == NULL) {
                         return luaL_error(L, "no memory");
                     }
 
+                    //将body复制到新创建的buf中
                     b->last = ngx_copy(b->last, q, len);
 
+                    //申请一个ngx_chain_t
                     body->bufs = ngx_alloc_chain_link(r->pool);
                     if (body->bufs == NULL) {
                         return luaL_error(L, "no memory");
                     }
 
+                    //将body挂到body->bufs上
                     body->bufs->buf = b;
                     body->bufs->next = NULL;
 
@@ -507,11 +568,13 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
             dd("queries query uri ctx?: %d", lua_gettop(L));
 
         } else {
+            //只有一个参数：ngx.location.capture(uri)
             method = NGX_HTTP_GET;
         }
 
         /* stack: queries query uri ctx? */
 
+        //uri
         p = (u_char *) luaL_checklstring(L, 3, &len);
 
         uri.data = ngx_palloc(r->pool, len);
@@ -527,6 +590,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
         flags = 0;
 
+        //解析url参数. url也可以携带args，如/abc?a=b&c=d
         rc = ngx_http_parse_unsafe_uri(r, &uri, &args, &flags);
         if (rc != NGX_OK) {
             dd("rc = %d", (int) rc);
@@ -534,8 +598,10 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
             return luaL_error(L, "unsafe uri in argument #1: %s", p);
         }
 
+        //如果url里没携带args参数
         if (args.len == 0) {
             if (extra_args.len) {
+                //之前的解析过程中, extra_args只是指向栈中的内存，在这里重新分配新的内存
                 p = ngx_palloc(r->pool, extra_args.len);
                 if (p == NULL) {
                     return luaL_error(L, "no memory");
@@ -543,11 +609,13 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
                 ngx_memcpy(p, extra_args.data, extra_args.len);
 
+                //拷贝至args中
                 args.data = p;
                 args.len = extra_args.len;
             }
 
         } else if (extra_args.len) {
+            //url和extra_args中都有参数，将两者合并进args中
             /* concatenate the two parts of args together */
             len = args.len + (sizeof("&") - 1) + extra_args.len;
 
@@ -564,9 +632,11 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
             args.len = len;
         }
 
+        //申请创建ngx_http_post_subrequest_t结构体
         ofs1 = ngx_align(sizeof(ngx_http_post_subrequest_t), sizeof(void *));
         ofs2 = ngx_align(sizeof(ngx_http_lua_ctx_t), sizeof(void *));
 
+        //ngx_http_post_subrequest_t+ngx_http_lua_ctx_t+ngx_http_lua_post_subrequest_data_t
         p = ngx_palloc(r->pool, ofs1 + ofs2
                        + sizeof(ngx_http_lua_post_subrequest_data_t));
         if (p == NULL) {
@@ -577,6 +647,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
         p += ofs1;
 
+        //子请求的 ngx_http_lua_module 上下文结构体
         sr_ctx = (ngx_http_lua_ctx_t *) p;
 
         ngx_http_lua_assert((void *) sr_ctx == ngx_align_ptr(sr_ctx,
@@ -600,15 +671,18 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
         psr_data->ctx = sr_ctx;
         psr_data->pr_co_ctx = coctx;
 
+        //子请求结束回调
         psr->handler = ngx_http_lua_post_subrequest;
         psr->data = psr_data;
 
+        //创建子请求，并调用ngx_http_post_request将子请求添加到主请求的posted_requests链表中
         rc = ngx_http_lua_subrequest(r, &uri, &args, &sr, psr, 0);
 
         if (rc != NGX_OK) {
             return luaL_error(L, "failed to issue subrequest: %d", (int) rc);
         }
 
+        //初始化子请求sr的上下文结构体ngx_http_lua_ctx_t
         ngx_http_lua_init_ctx(sr, sr_ctx);
 
         sr_ctx->capture = 1;
@@ -616,13 +690,17 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
         sr_ctx->last_body = &sr_ctx->body;
         sr_ctx->vm_state = ctx->vm_state;
 
+        //设置子请求sr的上下文结构体ngx_http_lua_ctx_t
         ngx_http_set_ctx(sr, sr_ctx, ngx_http_lua_module);
 
+        //根据method、always_forward_body、body、vars_action、extra_vars、extra_headers相关参数设置子请求sr
         rc = ngx_http_lua_adjust_subrequest(sr, method, always_forward_body,
                                             body, vars_action, extra_vars,
                                             extra_headers);
 
+        //如果上一步执行失败 
         if (rc != NGX_OK) {
+            //取消子请求， 遍历主请求的所有子请求，找到最后一个，将其设置为NULL
             ngx_http_lua_cancel_subreq(sr);
             return luaL_error(L, "failed to adjust the subrequest: %d",
                               (int) rc);
@@ -632,6 +710,7 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
         /* stack: queries query uri ctx? */
 
+        //如果要自定义ngx.ctx
         if (custom_ctx) {
             ngx_http_lua_ngx_set_ctx_helper(L, sr, sr_ctx, -1);
             lua_pop(L, 3);
@@ -649,10 +728,14 @@ ngx_http_lua_ngx_location_capture_multi(lua_State *L)
 
     ctx->no_abort = 1;
 
+    //当 C 函数调用了 lua_yieldk， 当前运行的协程会挂起. 参数 nresults 指栈上需返回给 lua_resume 的返回值的个数。
     return lua_yield(L, 0);
 }
 
 
+/**
+ * 根据method、always_forward_body、body、vars_action、extra_vars、extra_headers相关参数设置子请求sr
+ */
 static ngx_int_t
 ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
     int always_forward_body, ngx_http_request_body_t *body,
@@ -663,10 +746,13 @@ ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
     int                          pr_not_chunked = 0;
     size_t                       size;
 
+    //主请求
     r = sr->parent;
 
+    //默认复制主请求的header
     sr->header_in = r->header_in;
 
+    //如果body参数不为空，重设子请求的body参数
     if (body) {
         sr->request_body = body;
 
@@ -675,6 +761,7 @@ ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
                && method != NGX_HTTP_POST
                && r->headers_in.content_length_n > 0)
     {
+        //不转发主请求的请求体
         sr->request_body = NULL;
 
     } else {
@@ -686,18 +773,21 @@ ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
 
             /* deep-copy the request body */
 
+            //创建并复制一个新的sr->request_body
             if (ngx_http_lua_copy_in_file_request_body(sr) != NGX_OK) {
                 return NGX_ERROR;
             }
         }
     }
 
+    //默认子请求继承主请求的所有header
     if (ngx_http_lua_copy_request_headers(sr, r, pr_not_chunked, extra_headers)
         != NGX_OK)
     {
         return NGX_ERROR;
     }
 
+    //设置method
     sr->method = method;
 
     switch (method) {
@@ -768,6 +858,9 @@ ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
             return NGX_ERROR;
     }
 
+    //variables 
+
+    //如果不共享父请求的变量
     if (!(vars_action & NGX_HTTP_LUA_SHARE_ALL_VARS)) {
         /* we do not inherit the parent request's variables */
         cmcf = ngx_http_get_module_main_conf(sr, ngx_http_core_module);
@@ -776,17 +869,20 @@ ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
 
         if (vars_action & NGX_HTTP_LUA_COPY_ALL_VARS) {
 
+            //申请新的变量数组
             sr->variables = ngx_palloc(sr->pool, size);
             if (sr->variables == NULL) {
                 return NGX_ERROR;
             }
 
+            //将父请求的所有变量拷贝一份
             ngx_memcpy(sr->variables, r->variables, size);
 
         } else {
 
             /* we do not inherit the parent request's variables */
 
+            //只是拷贝了空间
             sr->variables = ngx_pcalloc(sr->pool, size);
             if (sr->variables == NULL) {
                 return NGX_ERROR;
@@ -794,10 +890,15 @@ ngx_http_lua_adjust_subrequest(ngx_http_request_t *sr, ngx_uint_t method,
         }
     }
 
+    //extra variables, 处理ngx.location.capture()传入的额外的变量
     return ngx_http_lua_subrequest_add_extra_vars(sr, extra_vars);
 }
 
 
+/**
+ * 将extra_vars中指定的variables值设值到子请求sr中
+ * extra_vars: 元素类型 ngx_keyval_t 的动态数组
+ */
 static ngx_int_t
 ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
     ngx_array_t *extra_vars)
@@ -823,6 +924,7 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
 
     variables_hash = &cmcf->variables_hash;
 
+    //遍历extra_vars动态数组
     var = extra_vars->elts;
 
     for (i = 0; i < extra_vars->nelts; i++, var++) {
@@ -841,6 +943,7 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
 
         p = ngx_copy(p, var->key.data, var->key.len);
 
+        //转小写计算hash
         hash = ngx_hash_strlow(name.data, name.data, name.len);
 
         val = p;
@@ -848,15 +951,19 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
 
         ngx_memcpy(p, var->value.data, len);
 
+        //查找变量
         v = ngx_hash_find(variables_hash, hash, name.data, name.len);
 
         if (v) {
+            //如果找到
             if (!(v->flags & NGX_HTTP_VAR_CHANGEABLE)) {
+                //变量不允许重新修改
                 ngx_log_error(NGX_LOG_ERR, sr->connection->log, 0,
                               "variable \"%V\" not changeable", &name);
                 return NGX_HTTP_INTERNAL_SERVER_ERROR;
             }
 
+            //如果有set_handler
             if (v->set_handler) {
                 vv = ngx_palloc(sr->pool, sizeof(ngx_http_variable_value_t));
                 if (vv == NULL) {
@@ -870,6 +977,7 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
                 vv->data = val;
                 vv->len = len;
 
+                //调用其set_handler
                 v->set_handler(sr, vv, v->data);
 
                 ngx_log_debug2(NGX_LOG_DEBUG_HTTP, sr->connection->log, 0,
@@ -879,6 +987,8 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
                 continue;
             }
 
+            /*说明没有set_handler*/
+            //如果是索引变量
             if (v->flags & NGX_HTTP_VAR_INDEXED) {
                 vv = &sr->variables[v->index];
 
@@ -886,6 +996,7 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
                 vv->not_found = 0;
                 vv->no_cacheable = 0;
 
+                //直接进行设值
                 vv->data = val;
                 vv->len = len;
 
@@ -908,6 +1019,11 @@ ngx_http_lua_subrequest_add_extra_vars(ngx_http_request_t *sr,
 }
 
 
+/**
+ * 将指定位置的table转换成一个元素类型为ngx_keyval_t的动态数组
+ * table: table在栈中的idx
+ * varsp: 出参, 一个执行动态数组的指针，元素类型为ngx_keyval_t
+ */
 static void
 ngx_http_lua_process_keyval_option(ngx_http_request_t *r, lua_State *L,
     int table, ngx_array_t **varsp)
@@ -921,6 +1037,7 @@ ngx_http_lua_process_keyval_option(ngx_http_request_t *r, lua_State *L,
 
     vars = *varsp;
 
+    //如果vars为NULL，则进行初始化
     if (vars == NULL) {
 
         vars = ngx_array_create(r->pool, 4, sizeof(ngx_keyval_t));
@@ -933,21 +1050,25 @@ ngx_http_lua_process_keyval_option(ngx_http_request_t *r, lua_State *L,
         *varsp = vars;
     }
 
+    //遍历table
     lua_pushnil(L);
     while (lua_next(L, table) != 0) {
 
+        //key必须是string
         if (lua_type(L, -2) != LUA_TSTRING) {
             luaL_error(L, "attempt to use a non-string key in the "
                        "\"vars\" option table");
             return;
         }
 
+        //value必须是string或number
         if (!lua_isstring(L, -1)) {
             luaL_error(L, "attempt to use bad variable value type %s",
                        luaL_typename(L, -1));
             return;
         }
 
+        //vars中添加一个元素
         var = ngx_array_push(vars);
         if (var == NULL) {
             dd("here");
@@ -963,6 +1084,10 @@ ngx_http_lua_process_keyval_option(ngx_http_request_t *r, lua_State *L,
 }
 
 
+/**
+ * 子请求结束回调
+ * ngx.location.capture()发起的子请求
+ */
 ngx_int_t
 ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
 {
@@ -979,6 +1104,7 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
 
     ctx = psr_data->ctx;
 
+    //已经执行过 ngx_http_lua_post_subrequest 方法了
     if (ctx->run_post_subrequest) {
         if (r != r->connection->data) {
             r->connection->data = r;
@@ -991,6 +1117,7 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
                    "lua run post subrequest handler, rc:%i c:%ud", rc,
                    r->main->count);
 
+    //置为已执行过
     ctx->run_post_subrequest = 1;
 
     pr = r->parent;
@@ -1001,8 +1128,10 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
     }
 
     pr_coctx = psr_data->pr_co_ctx;
+    //未结束子请求数-1
     pr_coctx->pending_subreqs--;
 
+    //如果所有子请求都已经执行完了
     if (pr_coctx->pending_subreqs == 0) {
         dd("all subrequests are done");
 
@@ -1011,6 +1140,7 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
         pr_ctx->cur_co_ctx = pr_coctx;
     }
 
+    //设置父请求继续执行的回调
     if (pr_ctx->entered_content_phase) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "lua restoring write event handler");
@@ -1027,8 +1157,10 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
 
     /*  capture subrequest response status */
 
+    //设置子请求响应状态码
     pr_coctx->sr_statuses[ctx->index] = r->headers_out.status;
 
+    //如果状态码为0, 根据rc值重置子请求的响应状态码
     if (pr_coctx->sr_statuses[ctx->index] == 0) {
         if (rc == NGX_OK) {
             rc = NGX_HTTP_OK;
@@ -1059,18 +1191,21 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
         }
     }
 
+    //设置子请求的headers_out
     pr_coctx->sr_headers[ctx->index] = &r->headers_out;
 
     /* copy subrequest response body */
 
     body_str = &pr_coctx->sr_bodies[ctx->index];
 
+    //计算子请求响应体长度
     len = 0;
     for (cl = ctx->body; cl; cl = cl->next) {
         /*  ignore all non-memory buffers */
         len += cl->buf->last - cl->buf->pos;
     }
 
+    //根据len申请内存空间，将子请求的响应体复制进去
     body_str->len = len;
 
     if (len == 0) {
@@ -1086,6 +1221,7 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
 
         /* copy from and then free the data buffers */
 
+        //复制响应体同时释放ctx->body
         for (cl = ctx->body; cl; cl = cl->next) {
             p = ngx_copy(p, cl->buf->pos, cl->buf->last - cl->buf->pos);
 
@@ -1108,6 +1244,7 @@ ngx_http_lua_post_subrequest(ngx_http_request_t *r, void *data, ngx_int_t rc)
         dd("free bufs: %p", pr_ctx->free_bufs);
     }
 
+    //创建一个ngx_http_posted_request_t，将其加入到r->main->posted_requests 头部
     ngx_http_post_request_to_head(pr);
 
     if (r != r->connection->data) {
@@ -1353,6 +1490,9 @@ ngx_http_lua_handle_subreq_responses(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.location.* api注入
+ */
 void
 ngx_http_lua_inject_subrequest_api(lua_State *L)
 {
@@ -1368,6 +1508,12 @@ ngx_http_lua_inject_subrequest_api(lua_State *L)
 }
 
 
+/**
+ * ngx_http_lua_ngx_location_capture_multi->.
+ * 
+ * 创建子请求的结构体 ngx_http_request_t, 大部分字段基于主请求进行初始化，
+ * 并调用ngx_http_post_request将sr指向的子请求添加到主请求的posted_requests链表中
+ */
 static ngx_int_t
 ngx_http_lua_subrequest(ngx_http_request_t *r,
     ngx_str_t *uri, ngx_str_t *args, ngx_http_request_t **psr,
@@ -1407,6 +1553,7 @@ ngx_http_lua_subrequest(ngx_http_request_t *r,
 
 #endif
 
+    //创建子请求的请求结构体ngx_http_request_t
     sr = ngx_pcalloc(r->pool, sizeof(ngx_http_request_t));
     if (sr == NULL) {
         return NGX_ERROR;
@@ -1415,13 +1562,16 @@ ngx_http_lua_subrequest(ngx_http_request_t *r,
     sr->signature = NGX_HTTP_MODULE;
 
     c = r->connection;
+    //与主请求共用连接
     sr->connection = c;
 
+    //ctx用于存放每个http模块的自定义上下文结构体
     sr->ctx = ngx_pcalloc(r->pool, sizeof(void *) * ngx_http_max_module);
     if (sr->ctx == NULL) {
         return NGX_ERROR;
     }
 
+    //初始化sr->headers_out动态数组
     if (ngx_list_init(&sr->headers_out.headers, r->pool, 20,
                       sizeof(ngx_table_elt_t))
         != NGX_OK)
@@ -1429,6 +1579,7 @@ ngx_http_lua_subrequest(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    //设置配置
     cscf = ngx_http_get_module_srv_conf(r, ngx_http_core_module);
     sr->main_conf = cscf->ctx->main_conf;
     sr->srv_conf = cscf->ctx->srv_conf;
@@ -1443,6 +1594,7 @@ ngx_http_lua_subrequest(ngx_http_request_t *r,
     ngx_http_clear_accept_ranges(sr);
     ngx_http_clear_last_modified(sr);
 
+    //默认继承主请求的请求体
     sr->request_body = r->request_body;
 
 #if (NGX_HTTP_SPDY)
@@ -1457,6 +1609,7 @@ ngx_http_lua_subrequest(ngx_http_request_t *r,
     sr->content_length_n = -1;
 #endif
 
+    //默认使用住请求的属性
     sr->method = NGX_HTTP_GET;
     sr->http_version = r->http_version;
 
@@ -1513,10 +1666,16 @@ ngx_http_lua_subrequest(ngx_http_request_t *r,
     ngx_http_probe_subrequest_start(sr);
 #endif
 
+    //将sr指向的子请求添加到主请求的posted_requests链表中
     return ngx_http_post_request(sr, NULL);
 }
 
 
+/**
+ * 如果所有子请求都执行完了
+ * 
+ * pr_ctx->resume_handler = ngx_http_lua_subrequest_resume;
+ */
 static ngx_int_t
 ngx_http_lua_subrequest_resume(ngx_http_request_t *r)
 {
@@ -1583,6 +1742,9 @@ ngx_http_lua_subrequest_resume(ngx_http_request_t *r)
 }
 
 
+/**
+ * 取消最后一个子请求(最新设置的)
+ */
 static void
 ngx_http_lua_cancel_subreq(ngx_http_request_t *r)
 {
@@ -1594,6 +1756,7 @@ ngx_http_lua_cancel_subreq(ngx_http_request_t *r)
     r->main->subrequests++;
 #endif
 
+    //遍历主请求的所有子请求，找到最后一个，将其设置为NULL
     p = &r->main->posted_requests;
     for (pr = r->main->posted_requests; pr->next; pr = pr->next) {
         p = &pr->next;
@@ -1605,6 +1768,9 @@ ngx_http_lua_cancel_subreq(ngx_http_request_t *r)
 }
 
 
+/**
+ * 创建一个ngx_http_posted_request_t，将其加入到r->main->posted_requests 头部
+ */
 static ngx_int_t
 ngx_http_post_request_to_head(ngx_http_request_t *r)
 {
@@ -1623,6 +1789,10 @@ ngx_http_post_request_to_head(ngx_http_request_t *r)
 }
 
 
+/**
+ * 复制一份r->request_body, 重新设置到r->request_body
+ * 复制一份r->request_body->temp_file, 重新设置到r->request_body->temp_file
+ */
 static ngx_int_t
 ngx_http_lua_copy_in_file_request_body(ngx_http_request_t *r)
 {
@@ -1639,18 +1809,22 @@ ngx_http_lua_copy_in_file_request_body(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
+    //创建一个新的ngx_http_request_body_t结构体
     body = ngx_palloc(r->pool, sizeof(ngx_http_request_body_t));
     if (body == NULL) {
         return NGX_ERROR;
     }
 
+    //复制r->request_body
     ngx_memcpy(body, r->request_body, sizeof(ngx_http_request_body_t));
 
+    //创建一个新的ngx_temp_file_t结构体
     body->temp_file = ngx_palloc(r->pool, sizeof(ngx_temp_file_t));
     if (body->temp_file == NULL) {
         return NGX_ERROR;
     }
 
+    //复制body->temp_file
     ngx_memcpy(body->temp_file, tf, sizeof(ngx_temp_file_t));
     dd("file fd: %d", body->temp_file->file.fd);
 
@@ -1660,6 +1834,9 @@ ngx_http_lua_copy_in_file_request_body(ngx_http_request_t *r)
 }
 
 
+/**
+ * 将父请求的请求头拷贝到子请求上
+ */
 static ngx_int_t
 ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
     ngx_http_request_t *pr, int pr_not_chunked, ngx_array_t *extra_headers)
@@ -1675,21 +1852,25 @@ ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
     dd("before: parent req headers count: %d",
        (int) pr->headers_in.headers.part.nelts);
 
+    //初始化子请求额headers_in动态数组
     if (ngx_list_init(&sr->headers_in.headers, sr->pool, 20,
                       sizeof(ngx_table_elt_t)) != NGX_OK)
     {
         return NGX_ERROR;
     }
 
+    //如果子请求有请求体且父请求不是chunked请求， 重新计算content_length请求头
     if (sr->request_body && !pr_not_chunked) {
 
         /* craft our own Content-Length */
         len = 0;
 
+        //遍历子请求的request_body
         for (in = sr->request_body->bufs; in; in = in->next) {
             len += ngx_buf_size(in->buf);
         }
 
+        //添加一个Content-Length请求头
         clh = ngx_list_push(&sr->headers_in.headers);
         if (clh == NULL) {
             return NGX_ERROR;
@@ -1707,15 +1888,18 @@ ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
 
         ngx_strlow(clh->lowcase_key, clh->key.data, clh->key.len);
 
+        //value申请空间
         p = ngx_palloc(sr->pool, NGX_OFF_T_LEN);
         if (p == NULL) {
             return NGX_ERROR;
         }
 
+        //将len转为字符串格式
         clh->value.data = p;
         clh->value.len = ngx_sprintf(clh->value.data, "%O", len)
                          - clh->value.data;
 
+        //设置content_length字段
         sr->headers_in.content_length = clh;
         sr->headers_in.content_length_n = len;
 
@@ -1726,6 +1910,7 @@ ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
 
     /* copy the parent request's headers */
 
+    //遍历父请求头，全部拷贝一份
     part = &pr->headers_in.headers.part;
     header = part->elts;
 
@@ -1752,6 +1937,7 @@ ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
             i = 0;
         }
 
+        //Content-Length请求头前边已经处理过了
         if (!pr_not_chunked && header[i].key.len == sizeof("Content-Length") - 1
             && ngx_strncasecmp(header[i].key.data, (u_char *) "Content-Length",
                                sizeof("Content-Length") - 1) == 0)
@@ -1763,6 +1949,7 @@ ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
            header[i].key.data, (int) header[i].value.len,
            header[i].value.data);
 
+        //将header[i] 设置到子请求sr->headers_in中
         if (ngx_http_lua_set_input_header(sr, header[i].key,
                                           header[i].value, 0) == NGX_ERROR)
         {
@@ -1770,6 +1957,7 @@ ngx_http_lua_copy_request_headers(ngx_http_request_t *sr,
         }
     }
 
+    //extra_headers
     if (extra_headers && extra_headers->nelts > 0) {
 
         header_keyval = extra_headers->elts;

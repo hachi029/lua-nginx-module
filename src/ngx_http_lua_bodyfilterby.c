@@ -385,6 +385,9 @@ ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 }
 
 
+/**
+ * 如果配置了body_filter_by_lua指令， 安装ngx_http_lua_body_filter
+ * */
 ngx_int_t
 ngx_http_lua_body_filter_init(void)
 {
@@ -497,6 +500,9 @@ ngx_http_lua_ffi_copy_body_filter_param_body(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.arg[1] = 'xx' 只能在body_filter阶段调用
+ */
 int
 ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
     ngx_http_lua_ctx_t *ctx)
@@ -518,6 +524,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     dd("index: %d", idx);
 
+    //idx只能是1或2
     if (idx != 1 && idx != 2) {
         return luaL_error(L, "bad index: %d", idx);
     }
@@ -526,7 +533,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     if (idx == 2) {
         /* overwriting the eof flag */
-        last = lua_toboolean(L, 3);
+        last = lua_toboolean(L, 3);     //ngx.arg[2]==true
 
         in = lmcf->body_filter_chain;
 
@@ -537,6 +544,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
              * before arg[2] = true
              */
             if (in == NULL) {
+                //获取一个ngx_chain_t
                 in = ngx_http_lua_chain_get_free_buf(r->connection->log,
                                                      r->pool,
                                                      &ctx->free_bufs, 0);
@@ -548,6 +556,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
                 lmcf->body_filter_chain = in;
             }
 
+            //遍历in，将最后一个节点last_buf或last_in_chain置1
             /* we set the "last_buf" or "last_in_chain" flag
              * in the last buf of "in" */
             for (cl = in; cl; cl = cl->next) {
@@ -564,10 +573,12 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
             }
 
         } else {
+            //ngx.arg[2]=0
             /* last == 0 */
 
             found = 0;
 
+            //遍历in，将最后一个节点last_buf或last_in_chain置0
             for (cl = in; cl; cl = cl->next) {
                 b = cl->buf;
 
@@ -605,12 +616,14 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
         break;
 
     case LUA_TNIL:
+        //ngx.arg[1]=nil
         /* discard the buffers */
 
         in = lmcf->body_filter_chain;
 
         last = 0;
 
+        //遍历cl, 将每个ngx_buf_t置为已消费
         for (cl = in; cl; cl = cl->next) {
             b = cl->buf;
 
@@ -631,6 +644,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
         goto done;
 
     case LUA_TTABLE:
+        //计算table的长度
         size = ngx_http_lua_calc_strlen_in_table(L, 3 /* index */, 3 /* arg */,
                                                  1 /* strict */);
         data = NULL;
@@ -645,6 +659,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     last = 0;
 
+    //遍历in链表，将其标记为已消费
     for (cl = in; cl; cl = cl->next) {
         b = cl->buf;
 
@@ -666,6 +681,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
         goto done;
     }
 
+    //申请size大小的内存空间ngx_buf_t， 同时将其挂在新申请的ngx_chain_t上
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
                                          &ctx->free_bufs, size);
     if (cl == NULL) {
@@ -674,9 +690,11 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     cl->buf->tag = (ngx_buf_tag_t) &ngx_http_lua_body_filter;
     if (type == LUA_TTABLE) {
+        //将table转为string, 复制进cl->buf
         cl->buf->last = ngx_http_lua_copy_str_in_table(L, 3, cl->buf->last);
 
     } else {
+        //将data指向的字符串复制进cl->buf
         cl->buf->last = ngx_copy(cl->buf->pos, data, size);
     }
 
@@ -684,6 +702,7 @@ done:
 
     if (last || flush) {
         if (cl == NULL) {
+            //获取一个ngx_chain_t
             cl = ngx_http_lua_chain_get_free_buf(r->connection->log,
                                                  r->pool,
                                                  &ctx->free_bufs, 0);
@@ -694,6 +713,7 @@ done:
             cl->buf->tag = (ngx_buf_tag_t) &ngx_http_lua_body_filter;
         }
 
+        //设置last标识
         if (last) {
             ctx->seen_last_in_filter = 1;
 
@@ -705,6 +725,7 @@ done:
             }
         }
 
+        //设置flush标识
         if (flush) {
             cl->buf->flush = 1;
         }

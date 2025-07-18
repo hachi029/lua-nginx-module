@@ -152,6 +152,9 @@ ngx_http_lua_alloc_sema(void)
 }
 
 
+/**
+ * 在cf->pool上添加的一个清理函数， data是ngx_http_lua_main_conf_t
+ * */
 void
 ngx_http_lua_sema_mm_cleanup(void *data)
 {

@@ -233,6 +233,9 @@ static char ngx_http_lua_pattern_udata_metatable_key;
     "__tcp_raw_req_cosocket_mt"
 
 
+/**
+ * 注入ngx.socket.*相关api
+ */
 void
 ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
 {
@@ -5081,6 +5084,11 @@ ngx_http_lua_socket_cleanup_compiled_pattern(lua_State *L)
 }
 
 
+/**
+ * ngx.req.socket()
+ * 
+ * tcpsock, err = ngx.req.socket(raw?)
+ */
 static int
 ngx_http_lua_req_socket(lua_State *L)
 {
@@ -5100,6 +5108,7 @@ ngx_http_lua_req_socket(lua_State *L)
     if (n == 0) {
         raw = 0;
 
+    //可以接收一个raw参数，如果为1，返回的是一个全双工的socket(既可以读也可以写)
     } else if (n == 1) {
         raw = lua_toboolean(L, 1);
         lua_pop(L, 1);
@@ -5111,6 +5120,7 @@ ngx_http_lua_req_socket(lua_State *L)
 
     r = ngx_http_lua_get_req(L);
 
+    //只能为主请求
     if (r != r->main) {
         return luaL_error(L, "attempt to read the request body in a "
                           "subrequest");
@@ -5134,6 +5144,7 @@ ngx_http_lua_req_socket(lua_State *L)
     }
 #endif
 
+    //非全双工模式，不支持chunked请求
     if (!raw && r->headers_in.chunked) {
         lua_pushnil(L);
         lua_pushliteral(L, "chunked request bodies not supported yet");
@@ -5145,6 +5156,7 @@ ngx_http_lua_req_socket(lua_State *L)
         return luaL_error(L, "no ctx found");
     }
 
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
@@ -5152,7 +5164,9 @@ ngx_http_lua_req_socket(lua_State *L)
 
     c = r->connection;
 
+    //双工模式
     if (raw) {
+        //正在读取请求体
         if (r->request_body) {
             if (r->request_body->rest > 0) {
                 lua_pushnil(L);
@@ -5192,6 +5206,7 @@ ngx_http_lua_req_socket(lua_State *L)
 
         dd("ctx acquired raw req socket: %d", ctx->acquired_raw_req_socket);
 
+        //检查是否已经调用过ngx.req.socket()方法了
         if (ctx->acquired_raw_req_socket) {
             lua_pushnil(L);
             lua_pushliteral(L, "duplicate call");
@@ -5203,14 +5218,17 @@ ngx_http_lua_req_socket(lua_State *L)
         r->lingering_close = 1;
 
     } else {
+        //非全双工， 用于读取请求体
         /* request body reader */
 
+        //已经读取过了
         if (r->request_body) {
             lua_pushnil(L);
             lua_pushliteral(L, "request body already exists");
             return 2;
         }
 
+        //请求体已经丢弃了
         if (r->discard_body) {
             lua_pushnil(L);
             lua_pushliteral(L, "request body discarded");
@@ -5219,12 +5237,14 @@ ngx_http_lua_req_socket(lua_State *L)
 
         dd("req content length: %d", (int) r->headers_in.content_length_n);
 
+        //没有请求体
         if (r->headers_in.content_length_n <= 0) {
             lua_pushnil(L);
             lua_pushliteral(L, "no body");
             return 2;
         }
 
+        //检查expect请求头
         if (ngx_http_lua_test_expect(r) != NGX_OK) {
             lua_pushnil(L);
             lua_pushliteral(L, "test expect failed");

@@ -27,6 +27,9 @@ static int ngx_http_lua_uthread_wait(lua_State *L);
 static int ngx_http_lua_uthread_kill(lua_State *L);
 
 
+/**
+ * 注入ngx.thread.*相关api
+ */
 void
 ngx_http_lua_inject_uthread_api(ngx_log_t *log, lua_State *L)
 {

@@ -282,6 +282,9 @@ ngx_http_lua_coroutine_yield(lua_State *L)
 }
 
 
+/**
+ * 注入协程相关api
+ */
 void
 ngx_http_lua_inject_coroutine_api(ngx_log_t *log, lua_State *L)
 {

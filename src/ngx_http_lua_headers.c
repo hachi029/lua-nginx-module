@@ -27,6 +27,9 @@ void ngx_http_lua_ngx_raw_header_cleanup(void *data);
 #endif
 
 
+/**
+ * 注入api ngx.resp.get_headers
+ */
 void
 ngx_http_lua_inject_resp_header_api(lua_State *L)
 {
@@ -39,6 +42,9 @@ ngx_http_lua_inject_resp_header_api(lua_State *L)
 }
 
 
+/**
+ * api注入
+ */
 void
 ngx_http_lua_inject_req_header_api(lua_State *L)
 {
@@ -53,6 +59,9 @@ ngx_http_lua_inject_req_header_api(lua_State *L)
 }
 
 
+/**
+ * ngx.req.http_version, 读取r->http_version
+ */
 static int
 ngx_http_lua_ngx_req_http_version(lua_State *L)
 {
@@ -99,6 +108,16 @@ ngx_http_lua_ngx_req_http_version(lua_State *L)
 }
 
 
+/**
+ * ngx.req.raw_header
+ * 
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#ngxreqraw_header
+ * 
+ *  str = ngx.req.raw_header(no_request_line?)
+ * 
+ *  获取请求的请求行和所有请求头。no_request_line 参数标识是否返回请求行
+ * 
+ */
 static int
 ngx_http_lua_ngx_req_raw_header(lua_State *L)
 {
@@ -122,6 +141,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
         no_req_line = lua_toboolean(L, 1);
     }
 
+    //no_req_line 是否返回请求行
     dd("no req line: %d", (int) no_req_line);
 
     r = ngx_http_lua_get_req(L);
@@ -135,6 +155,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
 
     ngx_http_lua_check_fake_request(L, r);
 
+    //获取主请求
     mr = r->main;
     hc = mr->http_connection;
     c = mr->connection;
@@ -170,15 +191,18 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
        c->buffer->end);
 #endif
 
+    //记录后续需要申请的内存大小
     size = 0;
     b = c->buffer;
 
+    //如果主请求的请求行长度为0
     if (mr->request_line.len == 0) {
         /* return empty string on invalid request */
         lua_pushlstring(L, "", 0);
         return 1;
     }
 
+    //换行是 CR 还是 CR LF
     if (mr->request_line.data[mr->request_line.len] == CR) {
         line_break_len = 2;
 
@@ -186,6 +210,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
         line_break_len = 1;
     }
 
+    //说明请求行在b中
     if (mr->request_line.data >= b->start
         && mr->request_line.data + mr->request_line.len
            + line_break_len <= b->pos)
@@ -198,11 +223,13 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
 
     if (hc->nbusy) {
 #if (nginx_version >= 1011011)
-        if (hc->nbusy > lmcf->busy_buf_ptr_count) {
+        //首次调用时lmcf->busy_buf_ptr_count==0
+        if (hc->nbusy > lmcf->busy_buf_ptr_count) {     //说明本次请求首次调用此函数，否则两个值应该相等
             if (lmcf->busy_buf_ptrs) {
                 ngx_free(lmcf->busy_buf_ptrs);
             }
 
+            //nbusy个ngx_buf_t的指针
             lmcf->busy_buf_ptrs = ngx_alloc(hc->nbusy * sizeof(ngx_buf_t *),
                                             r->connection->log);
 
@@ -210,9 +237,11 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
                 return luaL_error(L, "no memory");
             }
 
+            //设置 lmcf->busy_buf_ptr_count = hc->nbusy
             lmcf->busy_buf_ptr_count = hc->nbusy;
         }
 
+        //初始化bb数组
         bb = lmcf->busy_buf_ptrs;
         for (cl = hc->busy; cl; cl = cl->next) {
             *bb++ = cl->buf;
@@ -221,6 +250,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
         b = NULL;
 
 #if (nginx_version >= 1011011)
+        //遍历lmcf->busy_buf_ptrs数组
         bb = lmcf->busy_buf_ptrs;
         for (i = hc->nbusy; i > 0; i--) {
             b = bb[i - 1];
@@ -232,6 +262,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
             dd("busy buf: %d: [%.*s]", (int) i, (int) (b->pos - b->start),
                b->start);
 
+            //first为请求行数据所在的buf
             if (first == NULL) {
                 if (mr->request_line.data >= b->pos
                     || mr->request_line.data
@@ -255,6 +286,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
 
     dd("header size: %d", (int) size);
 
+    //分配size大小的空间
     data = lua_newuserdata(L, size);
     last = data;
 
@@ -265,7 +297,9 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
         found = 1;
         pos = b->pos;
 
+        //如果需要请求行
         if (no_req_line) {
+            //跳过请求行开始拷贝
             last = ngx_copy(data,
                             mr->request_line.data
                             + mr->request_line.len + line_break_len,
@@ -344,6 +378,7 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
                 }
 
             } else {
+                //复制整个buf
                 last = ngx_copy(last, b->start, pos - b->start);
             }
 
@@ -415,11 +450,19 @@ ngx_http_lua_ngx_req_raw_header(lua_State *L)
         }
     }
 
+    //重新复制一份到栈里
     lua_pushlstring(L, (char *) data, last - data);
     return 1;
 }
 
 
+/**
+ * api ngx.resp.get_headers
+ * 
+ * syntax: headers = ngx.resp.get_headers(max_headers?, raw?)
+ * 
+ * raw: 是否将header name转为小写
+ */
 static int
 ngx_http_lua_ngx_resp_get_headers(lua_State *L)
 {
@@ -446,11 +489,11 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
             max = NGX_HTTP_LUA_MAX_HEADERS;
 
         } else {
-            max = luaL_checkinteger(L, 1);
+            max = luaL_checkinteger(L, 1);      //最多返回的header数量。默认为100
         }
 
         if (n >= 2) {
-            raw = lua_toboolean(L, 2);
+            raw = lua_toboolean(L, 2);          //是否将header名称转为小写返回。默认为false 
         }
 
     } else {
@@ -469,6 +512,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
 
     ngx_http_lua_check_fake_request(L, r);
 
+    //遍历所有响应头，计算响应头数量
     part = &r->headers_out.headers.part;
     count = part->nelts;
     while (part->next != NULL) {
@@ -476,9 +520,10 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
         count += part->nelts;
     }
 
+    //创建一张count+2个元素的表
     lua_createtable(L, 0, count + 2);
 
-    if (!raw) {
+    if (!raw) {     //如果要将header的key转为小写
         lua_pushlightuserdata(L, ngx_http_lua_lightudata_mask(
                               headers_metatable_key));
         lua_rawget(L, LUA_REGISTRYINDEX);
@@ -486,6 +531,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
     }
 
 #if 1
+    //向返回的表中添加content-type头
     if (r->headers_out.content_type.len) {
         extra++;
         lua_pushliteral(L, "content-type");
@@ -494,6 +540,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
         lua_rawset(L, -3);
     }
 
+    //向返回的表中添加content-length头
     if (r->headers_out.content_length == NULL
         && r->headers_out.content_length_n >= 0)
     {
@@ -517,6 +564,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
         lua_rawset(L, -3);
     }
 
+    //向返回的表中添加connection头
     extra++;
     lua_pushliteral(L, "connection");
     if (r->headers_out.status == NGX_HTTP_SWITCHING_PROTOCOLS) {
@@ -531,6 +579,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
 
     lua_rawset(L, -3);
 
+    //向返回的表中添加transfer-encoding头
     if (r->chunked) {
         extra++;
         lua_pushliteral(L, "transfer-encoding");
@@ -539,6 +588,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
     }
 #endif
 
+    //计算剩余的还能返回的header数量，标记truncated
     if (max > 0 && count + extra > max) {
         truncated = 1;
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
@@ -550,6 +600,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
     part = &r->headers_out.headers.part;
     header = part->elts;
 
+    //遍历所有响应头，将其加入到返回的表中
     for (i = 0; /* void */; i++) {
 
         dd("stack top: %d", lua_gettop(L));
@@ -564,6 +615,7 @@ ngx_http_lua_ngx_resp_get_headers(lua_State *L)
             i = 0;
         }
 
+        //忽略要删除的heaer
         if (header[i].hash == 0) {
             continue;
         }
@@ -745,6 +797,11 @@ ngx_http_lua_ngx_req_header_set_helper(lua_State *L)
 }
 
 
+/**
+ * ngx_http_lua_inject_ngx_api->.
+ * 
+ * 注入ngx ngx.req.get_headers ngx.resp.get_headers 相关元表方法
+ */
 void
 ngx_http_lua_create_headers_metatable(ngx_log_t *log, lua_State *L)
 {
@@ -776,6 +833,10 @@ ngx_http_lua_create_headers_metatable(ngx_log_t *log, lua_State *L)
 }
 
 
+/**
+ * ngx.req.get_headers 方法使用
+ * 获取headers 数量
+ */
 int
 ngx_http_lua_ffi_req_get_headers_count(ngx_http_request_t *r, int max,
     int *truncated)
@@ -788,6 +849,7 @@ ngx_http_lua_ffi_req_get_headers_count(ngx_http_request_t *r, int max,
     ngx_table_elt_t              *header;
 #endif
 
+    //fake request
     if (r->connection->fd == (ngx_socket_t) -1) {
         return NGX_HTTP_LUA_FFI_BAD_CONTEXT;
     }
@@ -798,6 +860,7 @@ ngx_http_lua_ffi_req_get_headers_count(ngx_http_request_t *r, int max,
         max = NGX_HTTP_LUA_MAX_HEADERS;
     }
 
+    //遍历r->headers_in.headers 动态数组
     part = &r->headers_in.headers.part;
 
 #if (NGX_HTTP_V3)
@@ -848,6 +911,7 @@ ngx_http_lua_ffi_req_get_headers_count(ngx_http_request_t *r, int max,
     }
 #endif
 
+    //如果请求头数量超过max, 将count置为max， 且truncated置1
     if (max > 0 && count > max) {
         *truncated = 1;
 
@@ -861,6 +925,11 @@ ngx_http_lua_ffi_req_get_headers_count(ngx_http_request_t *r, int max,
 }
 
 
+/**
+ * 获取请求头 ngx.req.get_headers()
+ * out: 输出kv对
+ * count: 
+ */
 int
 ngx_http_lua_ffi_req_get_headers(ngx_http_request_t *r,
     ngx_http_lua_ffi_table_elt_t *out, int count, int raw)
@@ -892,6 +961,7 @@ ngx_http_lua_ffi_req_get_headers(ngx_http_request_t *r,
     }
 #endif
 
+    //遍历所有请求头
     part = &r->headers_in.headers.part;
     header = part->elts;
 
@@ -916,10 +986,12 @@ ngx_http_lua_ffi_req_get_headers(ngx_http_request_t *r,
 #endif
 
         if (raw) {
+            //原始key
             out[n].key.data = header[i].key.data;
             out[n].key.len = (int) header[i].key.len;
 
         } else {
+            //小写的key
             out[n].key.data = header[i].lowcase_key;
             out[n].key.len = (int) header[i].key.len;
         }
@@ -936,6 +1008,20 @@ ngx_http_lua_ffi_req_get_headers(ngx_http_request_t *r,
 }
 
 
+/**
+ * 设置响应头 ngx.header.HEADER='xxx'
+ * key_data:
+ * key_len:
+ * is_nil: 是否将值设值为nil , 即是否是要清空响应头
+ * sval:
+ * sval_len:
+ * mvals: 表示设置了多个值，mvals为指向多个值的数组的指针
+ * mvals_len: 值的数量
+ * override:
+ * errmsg:
+ * 
+ * 
+ */
 int
 ngx_http_lua_ffi_set_resp_header(ngx_http_request_t *r, const u_char *key_data,
     size_t key_len, int is_nil, const u_char *sval, size_t sval_len,
@@ -955,10 +1041,12 @@ ngx_http_lua_ffi_set_resp_header(ngx_http_request_t *r, const u_char *key_data,
         return NGX_HTTP_LUA_FFI_NO_REQ_CTX;
     }
 
+    //fake request
     if (r->connection->fd == (ngx_socket_t) -1) {
         return NGX_HTTP_LUA_FFI_BAD_CONTEXT;
     }
 
+    //如果响应头已经发出，不允许重新设置
     if (r->header_sent || ctx->header_sent) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "attempt to "
                       "set ngx.header.HEADER after sending out "
@@ -966,6 +1054,7 @@ ngx_http_lua_ffi_set_resp_header(ngx_http_request_t *r, const u_char *key_data,
         return NGX_DECLINED;
     }
 
+    //为key申请新的空间
     key.data = ngx_palloc(r->pool, key_len + 1);
     if (key.data == NULL) {
         goto nomem;
@@ -977,6 +1066,7 @@ ngx_http_lua_ffi_set_resp_header(ngx_http_request_t *r, const u_char *key_data,
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
+    //如果需要将key中的下划线转为中划线
     if (llcf->transform_underscores_in_resp_headers) {
         /* replace "_" with "-" */
         p = key.data;
@@ -987,9 +1077,11 @@ ngx_http_lua_ffi_set_resp_header(ngx_http_request_t *r, const u_char *key_data,
         }
     }
 
+    //标识用户重新设置了响应头
     ctx->headers_set = 1;
 
     if (is_nil) {
+        //如果是要清空响应头
         value.data = NULL;
         value.len = 0;
 
@@ -1000,6 +1092,7 @@ ngx_http_lua_ffi_set_resp_header(ngx_http_request_t *r, const u_char *key_data,
             value.len = 0;
 
         } else {
+            //设置了多个值，遍历每个值
             for (i = 0; i < mvals_len; i++) {
                 dd("header value table index %d", (int) i);
 
@@ -1056,6 +1149,21 @@ nomem:
 }
 
 
+/**
+ * ngx.req.set_header
+ * 
+ * syntax: ngx.req.set_header(header_name, header_value)
+ * 
+ * key:
+ * key_len:
+ * value:
+ * value_len
+ * mvals:
+ * mvals_len:
+ * override:
+ * errmsg:
+ * 
+ */
 int
 ngx_http_lua_ffi_req_set_header(ngx_http_request_t *r, const u_char *key,
     size_t key_len, const u_char *value, size_t value_len,
@@ -1075,6 +1183,7 @@ ngx_http_lua_ffi_req_set_header(ngx_http_request_t *r, const u_char *key,
         return NGX_DECLINED;
     }
 
+    //复制key
     k.data = ngx_palloc(r->pool, key_len + 1);
     if (k.data == NULL) {
         goto nomem;
@@ -1085,7 +1194,9 @@ ngx_http_lua_ffi_req_set_header(ngx_http_request_t *r, const u_char *key,
     k.len = key_len;
 
     if (mvals) {
+        // value为多个值
         if (mvals_len > 0) {
+            //遍历value的多个值
             for (i = 0; i < mvals_len; i++) {
                 p = mvals[i].data;
                 len = mvals[i].len;
@@ -1099,6 +1210,7 @@ ngx_http_lua_ffi_req_set_header(ngx_http_request_t *r, const u_char *key,
                 v.data[len] = '\0';
                 v.len = len;
 
+                //调用单个header的设置方法。里边会遍历r->headers查找同名的header
                 if (ngx_http_lua_set_input_header(r, k, v, override && i == 0)
                     != NGX_OK)
                 {
@@ -1113,6 +1225,7 @@ ngx_http_lua_ffi_req_set_header(ngx_http_request_t *r, const u_char *key,
         v.len = 0;
 
     } else if (value) {
+        //设置单个值
         v.data = ngx_palloc(r->pool, value_len + 1);
         if (v.data == NULL) {
             goto nomem;
@@ -1145,6 +1258,14 @@ failed:
 }
 
 
+/**
+ * 读取ngx.header.HEADER
+ * key: key
+ * key_len: key_len
+ * key_buf：新的用于存放key的buf. （key在本方法中可能被改写，而传入的*key可能是不能被修改的）
+ * values: 出参。用于存放value的数组，数组个数为 max_nvalues
+ * max_nvalues:最大读取的header的value的个数，默认值100
+ */
 int
 ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
     const u_char *key, size_t key_len,
@@ -1161,6 +1282,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
 
     ngx_http_lua_loc_conf_t     *llcf;
 
+    //fake request
     if (r->connection->fd == (ngx_socket_t) -1) {
         return NGX_HTTP_LUA_FFI_BAD_CONTEXT;
     }
@@ -1172,6 +1294,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
     }
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
+    //是否将header name中的_替换为-
     if (llcf->transform_underscores_in_resp_headers
         && memchr(key, '_', key_len) != NULL)
     {
@@ -1181,15 +1304,19 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
                 c = '-';
             }
 
+            //如果要修改的话，复制一份到key_buf中
             key_buf[i] = c;
         }
 
     } else {
+        //无需修改，直接将key_buf指向key
         key_buf = (u_char *) key;
     }
 
+    //对于几个常见的请求头，Content-Length/Content-Type/Last-Modified 直接设置返回值
     switch (key_len) {
     case 14:
+        //如果key是Content-Length
         if (r->headers_out.content_length == NULL
             && r->headers_out.content_length_n >= 0
             && ngx_strncasecmp(key_buf, (u_char *) "Content-Length", 14) == 0)
@@ -1200,6 +1327,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
                 return NGX_ERROR;
             }
 
+            //设置返回参数
             values[0].data = p;
             values[0].len = (int) (ngx_snprintf(p, NGX_OFF_T_LEN, "%O",
                                               r->headers_out.content_length_n)
@@ -1210,9 +1338,11 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
         break;
 
     case 12:
+        //如果key是Content-Type
         if (ngx_strncasecmp(key_buf, (u_char *) "Content-Type", 12) == 0
             && r->headers_out.content_type.len)
         {
+            //设置返回参数
             values[0].data = r->headers_out.content_type.data;
             values[0].len = r->headers_out.content_type.len;
             return 1;
@@ -1221,6 +1351,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
         break;
 
     case 13:
+        //如果key是Last-Modified
         if (ngx_strncasecmp(key_buf, (u_char *) "Last-Modified", 13) == 0) {
             last_modified = r->headers_out.last_modified_time;
             if (last_modified >= 0) {
@@ -1231,6 +1362,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
                     return NGX_ERROR;
                 }
 
+                //设置返回参数
                 values[0].data = p;
                 values[0].len = ngx_http_time(p, last_modified) - p;
 
@@ -1265,6 +1397,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
 
     found = 0;
 
+    //遍历响应头
     part = &r->headers_out.headers.part;
     h = part->elts;
 
@@ -1280,6 +1413,7 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
             i = 0;
         }
 
+        //跳过hash为0的响应头
         if (h[i].hash == 0) {
             continue;
         }
@@ -1287,12 +1421,15 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
         dd("checking (%d) \"%.*s\"", (int) h[i].key.len, (int) h[i].key.len,
            h[i].key.data);
 
+        //根据key查找header
         if (h[i].key.len == key_len
             && ngx_strncasecmp(key_buf, h[i].key.data, key_len) == 0)
         {
+            //如果找到
             values[found].data = h[i].value.data;
             values[found].len = (int) h[i].value.len;
 
+            //达到最大的返回值数量
             if (++found >= max_nvalues) {
                 break;
             }
@@ -1303,6 +1440,9 @@ ngx_http_lua_ffi_get_resp_header(ngx_http_request_t *r,
 }
 
 
+/**
+ * 添加在cf->pool上的清理函数
+ */
 #if (nginx_version >= 1011011)
 void
 ngx_http_lua_ngx_raw_header_cleanup(void *data)

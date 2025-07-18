@@ -21,6 +21,9 @@ static int ngx_http_lua_ngx_redirect(lua_State *L);
 static int ngx_http_lua_on_abort(lua_State *L);
 
 
+/**
+ * ngx api注入
+ */
 void
 ngx_http_lua_inject_control_api(ngx_log_t *log, lua_State *L)
 {
@@ -41,6 +44,13 @@ ngx_http_lua_inject_control_api(ngx_log_t *log, lua_State *L)
 }
 
 
+/**
+ * ngx.exec
+ * 
+ * ngx.exec(uri, args?)
+ * 
+ * 执行一个内部重定向 args可以是table或string; uri也可以包含args
+ */
 static int
 ngx_http_lua_ngx_exec(lua_State *L)
 {
@@ -70,12 +80,14 @@ ngx_http_lua_ngx_exec(lua_State *L)
 
     /* read the 1st argument (uri) */
 
+    //uri
     p = (u_char *) luaL_checklstring(L, 1, &len);
 
     if (len == 0) {
         return luaL_error(L, "The uri argument is empty");
     }
 
+    //从栈中复制出uri
     uri.data = ngx_palloc(r->pool, len);
     if (uri.data == NULL) {
         return luaL_error(L, "no memory");
@@ -90,6 +102,7 @@ ngx_http_lua_ngx_exec(lua_State *L)
         return luaL_error(L, "no ctx found");
     }
 
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
@@ -99,6 +112,7 @@ ngx_http_lua_ngx_exec(lua_State *L)
 
     flags = NGX_HTTP_LOG_UNSAFE;
 
+    //uri解析
     if (ngx_http_parse_unsafe_uri(r, &uri, &args, &flags) != NGX_OK) {
         return luaL_error(L, "unsafe uri");
     }
@@ -107,11 +121,13 @@ ngx_http_lua_ngx_exec(lua_State *L)
         /* read the 2nd argument (args) */
         dd("args type: %s", luaL_typename(L, 2));
 
+        //第二个参数可以是number、string、table
         switch (lua_type(L, 2)) {
         case LUA_TNUMBER:
         case LUA_TSTRING:
             p = (u_char *) lua_tolstring(L, 2, &len);
 
+            //从栈中复制出来user_args
             user_args.data = ngx_palloc(r->pool, len);
             if (user_args.data == NULL) {
                 return luaL_error(L, "no memory");
@@ -123,6 +139,7 @@ ngx_http_lua_ngx_exec(lua_State *L)
             break;
 
         case LUA_TTABLE:
+            //将栈中的table转为字符串格式的args
             ngx_http_lua_process_args_option(r, L, 2, &user_args);
 
             dd("user_args: %.*s", (int) user_args.len, user_args.data);
@@ -144,11 +161,13 @@ ngx_http_lua_ngx_exec(lua_State *L)
         user_args.len = 0;
     }
 
+    //user_args 为第二个参数string或table转成的
     if (user_args.len) {
-        if (args.len == 0) {
+        if (args.len == 0) {    //arg为第一个参数uri中解析出来的
             args = user_args;
 
         } else {
+            //申请新的空间，将两个参数中的arg合并
             p = ngx_palloc(r->pool, args.len + user_args.len + 1);
             if (p == NULL) {
                 return luaL_error(L, "no memory");
@@ -163,6 +182,7 @@ ngx_http_lua_ngx_exec(lua_State *L)
         }
     }
 
+    //必须在向客户端发送响应头之前调用ngx.exec
     if (r->header_sent || ctx->header_sent) {
         return luaL_error(L, "attempt to call ngx.exec after "
                           "sending out response headers");
@@ -179,6 +199,12 @@ ngx_http_lua_ngx_exec(lua_State *L)
 }
 
 
+/**
+ *  ngx.redirect
+ * 
+ * syntax: ngx.redirect(uri, status?)
+ * 
+ */
 static int
 ngx_http_lua_ngx_redirect(lua_State *L)
 {
@@ -211,14 +237,15 @@ ngx_http_lua_ngx_redirect(lua_State *L)
             && rc != NGX_HTTP_PERMANENT_REDIRECT
             && rc != NGX_HTTP_TEMPORARY_REDIRECT)
         {
-            return luaL_error(L, "only ngx.HTTP_MOVED_TEMPORARILY, "
-                              "ngx.HTTP_MOVED_PERMANENTLY, "
-                              "ngx.HTTP_PERMANENT_REDIRECT, "
-                              "ngx.HTTP_SEE_OTHER, and "
-                              "ngx.HTTP_TEMPORARY_REDIRECT are allowed");
+            return luaL_error(L, "only ngx.HTTP_MOVED_TEMPORARILY, "            //302
+                              "ngx.HTTP_MOVED_PERMANENTLY, "                    //301
+                              "ngx.HTTP_PERMANENT_REDIRECT, "                   //308
+                              "ngx.HTTP_SEE_OTHER, and "                        //303
+                              "ngx.HTTP_TEMPORARY_REDIRECT are allowed");       //307
         }
 
     } else {
+        //默认值 302
         rc = NGX_HTTP_MOVED_TEMPORARILY;
     }
 
@@ -232,6 +259,7 @@ ngx_http_lua_ngx_redirect(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
@@ -239,12 +267,15 @@ ngx_http_lua_ngx_redirect(lua_State *L)
 
     ngx_http_lua_check_if_abortable(L, ctx);
 
+    //如果响应头已经发送了
     if (r->header_sent || ctx->header_sent) {
         return luaL_error(L, "attempt to call ngx.redirect after sending out "
                           "the headers");
     }
 
+    //uri是否包含不安全的字符
     if (ngx_http_lua_check_unsafe_uri_bytes(r, p, len, &byte) != NGX_OK) {
+        //输出错误消息
         buf_len = ngx_http_lua_escape_log(NULL, p, len) + 1;
         buf = ngx_palloc(r->pool, buf_len);
         if (buf == NULL) {
@@ -257,6 +288,7 @@ ngx_http_lua_ngx_redirect(lua_State *L)
                           byte, buf);
     }
 
+    //申请空间，将栈中的uri复制出来
     uri = ngx_palloc(r->pool, len);
     if (uri == NULL) {
         return luaL_error(L, "no memory");
@@ -264,6 +296,7 @@ ngx_http_lua_ngx_redirect(lua_State *L)
 
     ngx_memcpy(uri, p, len);
 
+    //添加一个请求头
     h = ngx_list_push(&r->headers_out.headers);
     if (h == NULL) {
         return luaL_error(L, "no memory");
@@ -278,15 +311,19 @@ ngx_http_lua_ngx_redirect(lua_State *L)
                                        sizeof("Location") - 1));
 #endif
 
+    //value为uri
     h->value.len = len;
     h->value.data = uri;
 #if defined(nginx_version) && nginx_version >= 1023000
     h->next = NULL;
 #endif
+    //key为Location
     ngx_str_set(&h->key, "Location");
 
+    //响应状态码
     r->headers_out.status = rc;
 
+    //响应状态码
     ctx->exit_code = rc;
     ctx->exited = 1;
 

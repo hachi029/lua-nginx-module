@@ -166,6 +166,9 @@ static ngx_http_lua_set_header_t  ngx_http_lua_set_handlers[] = {
 };
 
 
+/**
+ * 通用的设置请求头的方法
+ */
 /* request time implementation */
 
 static ngx_int_t
@@ -176,6 +179,14 @@ ngx_http_set_header(ngx_http_request_t *r, ngx_http_lua_header_val_t *hv,
 }
 
 
+/**
+ * 设置请求header的一个辅助方法
+ * 
+ * 
+ * value: header值
+ * output_header: 出参，指向实际设置的header
+ * 
+ */
 static ngx_int_t
 ngx_http_set_header_helper(ngx_http_request_t *r, ngx_http_lua_header_val_t *hv,
     ngx_str_t *value, ngx_table_elt_t **output_header)
@@ -185,7 +196,9 @@ ngx_http_set_header_helper(ngx_http_request_t *r, ngx_http_lua_header_val_t *hv,
     ngx_uint_t                   i;
     ngx_uint_t                   rc;
 
+    //表示不要覆盖已有的同名header
     if (hv->no_override) {
+        //添加一个新的header
         goto new_header;
     }
 
@@ -193,6 +206,7 @@ ngx_http_set_header_helper(ngx_http_request_t *r, ngx_http_lua_header_val_t *hv,
 
 retry:
 
+    //遍历所有的header动态数组 r->headers_in.headers， 查找是否有同名的
     part = &r->headers_in.headers.part;
     h = part->elts;
 
@@ -213,12 +227,15 @@ retry:
             && ngx_strncasecmp(h[i].key.data, hv->key.data, h[i].key.len)
                == 0)
         {
+            //找到同名的heade了, value->len==0表示要移除这个header
             if (value->len == 0 || (matched && matched != &h[i])) {
+                //将其hash设为0
                 h[i].hash = 0;
 
                 dd("rm header %.*s: %.*s", (int) h[i].key.len, h[i].key.data,
                    (int) h[i].value.len, h[i].value.data);
 
+                //移除header
                 rc = ngx_http_lua_rm_header_helper(&r->headers_in.headers,
                                                    part, i);
 
@@ -240,6 +257,7 @@ retry:
                 return NGX_ERROR;
             }
 
+            //设置值。h[i]为r->headers_in中的元素
             h[i].value = *value;
 
             if (output_header) {
@@ -253,16 +271,20 @@ retry:
         }
     }
 
+    //找到了同名的header
     if (matched){
         return NGX_OK;
     }
+    /** 没找到同名的header, 表示要添加一个新的header */
 
+    //表示要移除这个header, 什么也无需做
     if (value->len == 0) {
         return NGX_OK;
     }
 
 new_header:
 
+    //r->headers_in.headers 中添加一个元素
     h = ngx_list_push(&r->headers_in.headers);
 
     if (h == NULL) {
@@ -275,15 +297,18 @@ new_header:
         h->hash = 0;
 
     } else {
+        //设置hash
         h->hash = hv->hash;
     }
 
+    //设置key和value
     h->key = hv->key;
     h->value = *value;
 #if defined(nginx_version) && nginx_version >= 1023000
     h->next = NULL;
 #endif
 
+    //设置lowcase_key
     h->lowcase_key = ngx_pnalloc(r->pool, h->key.len);
     if (h->lowcase_key == NULL) {
         return NGX_ERROR;
@@ -299,6 +324,9 @@ new_header:
 }
 
 
+/**
+ * 将value设置到r->headers_in对应的属性上
+ */
 static ngx_int_t
 ngx_http_set_builtin_header(ngx_http_request_t *r,
     ngx_http_lua_header_val_t *hv, ngx_str_t *value)
@@ -308,6 +336,7 @@ ngx_http_set_builtin_header(ngx_http_request_t *r,
     dd("entered set_builtin_header (input)");
 
     if (hv->offset) {
+        //根据offset找到属性位置
         old = (ngx_table_elt_t **) ((char *) &r->headers_in + hv->offset);
 
     } else {
@@ -432,6 +461,9 @@ ngx_http_lua_validate_host(ngx_str_t *host, ngx_pool_t *pool, ngx_uint_t alloc)
 }
 
 
+/**
+ * 当复制主请求header到子请求时，对Host请求头进行额外处理
+ */
 static ngx_int_t
 ngx_http_set_host_header(ngx_http_request_t *r, ngx_http_lua_header_val_t *hv,
     ngx_str_t *value)
@@ -447,16 +479,19 @@ ngx_http_set_host_header(ngx_http_request_t *r, ngx_http_lua_header_val_t *hv,
     if (value->len) {
         host= *value;
 
+        //校验请求Host
         if (ngx_http_lua_validate_host(&host, r->pool, 0) != NGX_OK) {
             return NGX_ERROR;
         }
 
+        //设置host到server
         r->headers_in.server = host;
 
     } else {
         r->headers_in.server = *value;
     }
 
+    //将$host置为无效
     var = &r->variables[lmcf->host_var_index];
     var->valid = 0;
     var->not_found = 0;
@@ -562,6 +597,9 @@ ngx_http_set_user_agent_header(ngx_http_request_t *r,
 }
 
 
+/**
+ * 设置请求头 content_length
+ */
 static ngx_int_t
 ngx_http_set_content_length_header(ngx_http_request_t *r,
     ngx_http_lua_header_val_t *hv, ngx_str_t *value)
@@ -699,6 +737,10 @@ ngx_http_clear_builtin_header(ngx_http_request_t *r,
 }
 
 
+/**
+ * 1.将key和value都进行uri转义
+ * 2.查找ngx_http_lua_set_handlers数组中定义的handler，对此header进行额外的处理
+ */
 ngx_int_t
 ngx_http_lua_set_input_header(ngx_http_request_t *r, ngx_str_t key,
     ngx_str_t value, unsigned override)
@@ -710,17 +752,20 @@ ngx_http_lua_set_input_header(ngx_http_request_t *r, ngx_str_t key,
 
     dd("set header value: %.*s", (int) value.len, value.data);
 
+    //对key进行uri转码，如果含有需要转义的字符，会将原值复制后再转义
     rc = ngx_http_lua_copy_escaped_header(r, &key, 1);
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //对value进行uri转码
     rc = ngx_http_lua_copy_escaped_header(r, &value, 0);
     if (rc != NGX_OK) {
         return NGX_ERROR;
     }
 
     if (value.len > 0) {
+        //key小写后的hash
         hv.hash = ngx_hash_key_lc(key.data, key.len);
 
     } else {
@@ -733,7 +778,9 @@ ngx_http_lua_set_input_header(ngx_http_request_t *r, ngx_str_t key,
     hv.no_override = !override;
     hv.handler = NULL;
 
+    //遍历预定义的 ngx_http_lua_set_handlers 数组，对在数组里的header进行调用其handler进行额外处理
     for (i = 0; handlers[i].name.len; i++) {
+        //根据Key进行查找
         if (hv.key.len != handlers[i].name.len
             || ngx_strncasecmp(hv.key.data, handlers[i].name.data,
                                handlers[i].name.len) != 0)
@@ -746,15 +793,17 @@ ngx_http_lua_set_input_header(ngx_http_request_t *r, ngx_str_t key,
 
         dd("Matched handler: %s %s", handlers[i].name.data, hv.key.data);
 
+        //赋值offset和handler
         hv.offset = handlers[i].offset;
         hv.handler = handlers[i].handler;
 
         break;
     }
 
+    //ngx_http_lua_set_handlers数组的最后一个元素，作为默认的处理方式，handler为 ngx_http_set_header
     if (handlers[i].name.len == 0 && handlers[i].handler) {
         hv.offset = handlers[i].offset;
-        hv.handler = handlers[i].handler;
+        hv.handler = handlers[i].handler;   //ngx_http_set_header
     }
 
 #if 1
@@ -768,10 +817,20 @@ ngx_http_lua_set_input_header(ngx_http_request_t *r, ngx_str_t key,
         return NGX_OK;
     }
 
+    //调用ngx_http_lua_set_handlers数组元素定义的handler
     return hv.handler(r, &hv, &value);
 }
 
 
+/**
+ * 从链表l中移除单个header
+ * l: 要移除的header所在的单向链表l
+ * cur: 要移除的heaner在l中所在的part
+ * i: 要移除的heaner在所在part上的位置
+ * 
+ * 这个方法写得比较复杂，是因为要请求的header可能在单链表l的各个部分，需要考虑各种情况
+ * 
+ */
 static ngx_int_t
 ngx_http_lua_rm_header_helper(ngx_list_t *l, ngx_list_part_t *cur,
     ngx_uint_t i)
@@ -790,24 +849,30 @@ ngx_http_lua_rm_header_helper(ngx_list_t *l, ngx_list_part_t *cur,
     dd("removing: \"%.*s:%.*s\"", (int) data[i].key.len, data[i].key.data,
        (int) data[i].value.len, data[i].value.data);
 
+    //如果是cur中的第一个entry
     if (i == 0) {
         dd("first entry in the part");
         cur->elts = (char *) cur->elts + l->size;
         cur->nelts--;
 
+        //如果cur是链表l的最后一个part
         if (cur == l->last) {
             dd("being the last part");
+            //cur这个part只有一个元素，将cur从l中移除
             if (cur->nelts == 0) {
 #if 1
                 part = &l->part;
                 dd("cur=%p, part=%p, part next=%p, last=%p",
                    cur, part, part->next, l->last);
 
+                //如果cur就是l的首个part
                 if (part == cur) {
+                    //重置cur->elts指针(向前移动一个元素的长度)
                     cur->elts = (char *) cur->elts - l->size;
                     /* do nothing */
 
                 } else {
+                    //找到cur的前一个part
                     while (part->next != cur) {
                         if (part->next == NULL) {
                             return NGX_ERROR;
@@ -816,7 +881,9 @@ ngx_http_lua_rm_header_helper(ngx_list_t *l, ngx_list_part_t *cur,
                         part = part->next;
                     }
 
+                    //重置l->last
                     l->last = part;
+                    //重置l->last->next
                     part->next = NULL;
                     dd("part nelts: %d", (int) part->nelts);
                     l->nalloc = part->nelts;
@@ -824,6 +891,7 @@ ngx_http_lua_rm_header_helper(ngx_list_t *l, ngx_list_part_t *cur,
 #endif
 
             } else {
+                //cur的元素个数大于1
                 l->nalloc--;
                 dd("nalloc decreased: %d", (int) l->nalloc);
             }
@@ -831,6 +899,9 @@ ngx_http_lua_rm_header_helper(ngx_list_t *l, ngx_list_part_t *cur,
             return NGX_OK;
         }
 
+        /* cur 不是l的最后一个part*/
+
+        //说明cur中只有一个entry
         if (cur->nelts == 0) {
             dd("current part is empty");
             part = &l->part;

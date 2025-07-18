@@ -305,6 +305,9 @@ ngx_http_lua_shdict_expire(ngx_http_lua_shdict_ctx_t *ctx, ngx_uint_t n)
 }
 
 
+/**
+ * 注入ngx.shared.*相关api
+ */
 void
 ngx_http_lua_inject_shdict_api(ngx_http_lua_main_conf_t *lmcf, lua_State *L)
 {

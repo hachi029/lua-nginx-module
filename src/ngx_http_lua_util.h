@@ -76,6 +76,9 @@
     }
 
 
+/**
+ * r->connection->fd==-1视为fake_request
+ */
 #define ngx_http_lua_check_fake_request(L, r)                                \
     if ((r)->connection->fd == (ngx_socket_t) -1) {                          \
         return luaL_error(L, "API disabled in the current context");         \
@@ -272,10 +275,14 @@ void ngx_http_lua_resume_quic_ssl_handshake(ngx_connection_t *c);
 #endif
 
 
+/**
+ * 初始化ngx_http_lua_ctx_t
+ */
 static ngx_inline void
 ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
     ngx_memzero(ctx, sizeof(ngx_http_lua_ctx_t));
+    //-2
     ctx->ctx_ref = LUA_NOREF;
     ctx->entry_co_ctx.co_ref = LUA_NOREF;
     ctx->entry_co_ctx.next_zombie_child_thread =
@@ -285,6 +292,10 @@ ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 }
 
 
+/**
+ * 创建ngx_http_lua_module的上下文结构体
+ * 
+ */
 static ngx_inline ngx_http_lua_ctx_t *
 ngx_http_lua_create_ctx(ngx_http_request_t *r)
 {
@@ -295,15 +306,19 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
     ngx_http_lua_loc_conf_t     *llcf;
     ngx_http_lua_main_conf_t    *lmcf;
 
+    //创建上下文结构体
     ctx = ngx_palloc(r->pool, sizeof(ngx_http_lua_ctx_t));
     if (ctx == NULL) {
         return NULL;
     }
 
+    //初始化相关属性
     ngx_http_lua_init_ctx(r, ctx);
+    //保存ctx
     ngx_http_set_ctx(r, ctx, ngx_http_lua_module);
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
+    //如果disable_code_cache
     if (!llcf->enable_code_cache && r->connection->fd != (ngx_socket_t) -1) {
         lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
 
@@ -311,6 +326,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
         dd("lmcf: %p", lmcf);
 #endif
 
+        //重新初始化jit vm
         rc = ngx_http_lua_init_vm(&L, lmcf->lua, lmcf->cycle, r->pool, lmcf,
                                   r->connection->log, &cln);
         if (rc != NGX_OK) {
@@ -528,6 +544,13 @@ ngx_inet_get_port(struct sockaddr *sa)
 #endif
 
 
+/**
+ * str是否包含不安全的字符
+ * 
+ * *str：要检测的str
+ * len：要检测的str长度
+ * *byte: 不安全字符，用于输出
+ */
 static ngx_inline ngx_int_t
 ngx_http_lua_check_unsafe_uri_bytes(ngx_http_request_t *r, u_char *str,
     size_t len, u_char *byte)

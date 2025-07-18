@@ -18,6 +18,11 @@
 #endif
 
 
+/**
+ * exit process
+ * 
+ * exit_process回调方法在服务停止前调用。在 master/worker模式下， worker进程会在退出前调用它
+ */
 void
 ngx_http_lua_exit_worker(ngx_cycle_t *cycle)
 {

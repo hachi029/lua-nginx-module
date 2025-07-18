@@ -76,6 +76,9 @@ enum {
 };
 
 
+/**
+ * lua_shared_dict 配置指令解析
+ */
 char *
 ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -161,6 +164,10 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_code_cache 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_code_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -185,6 +192,9 @@ ngx_http_lua_code_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_load_resty_core 配置指令解析
+ */
 char *
 ngx_http_lua_load_resty_core(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -196,6 +206,9 @@ ngx_http_lua_load_resty_core(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_package_cpath 配置指令解析
+ */
 char *
 ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -210,6 +223,7 @@ ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //设置到lmcf->lua_cpath中
     lmcf->lua_cpath.len = value[1].len;
     lmcf->lua_cpath.data = value[1].data;
 
@@ -217,6 +231,10 @@ ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_package_path 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -231,6 +249,7 @@ ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //设置到lmcf->lua_path中
     lmcf->lua_path.len = value[1].len;
     lmcf->lua_path.data = value[1].data;
 
@@ -238,6 +257,9 @@ ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_regex_cache_max_entries 配置指令解析
+ */
 char *
 ngx_http_lua_regex_cache_max_entries(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -250,6 +272,9 @@ ngx_http_lua_regex_cache_max_entries(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * lua_regex_match_limit 配置指令解析
+ */
 char *
 ngx_http_lua_regex_match_limit(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -262,6 +287,9 @@ ngx_http_lua_regex_match_limit(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * set_by_lua_block 配置指令解析
+ */
 #if defined(NDK) && NDK
 char *
 ngx_http_lua_set_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
@@ -282,6 +310,9 @@ ngx_http_lua_set_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * set_by_lua/set_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_set_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -489,6 +520,9 @@ ngx_http_lua_filter_set_by_lua_file(ngx_http_request_t *r, ngx_str_t *val,
 #endif /* defined(NDK) && NDK */
 
 
+/**
+ * rewrite_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_rewrite_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -508,6 +542,10 @@ ngx_http_lua_rewrite_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * rewrite_by_lua/rewrite_by_lua_file 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -591,6 +629,10 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * server_rewrite_by_lua_block 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_server_rewrite_by_lua_block(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf)
@@ -609,6 +651,9 @@ ngx_http_lua_server_rewrite_by_lua_block(ngx_conf_t *cf,
 }
 
 
+/**
+ * server_rewrite_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_server_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -696,6 +741,9 @@ ngx_http_lua_server_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * access_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_access_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -715,6 +763,9 @@ ngx_http_lua_access_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * access_by_lua_file/access_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -798,6 +849,9 @@ ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * content_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -817,6 +871,9 @@ ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * content_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -910,6 +967,9 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * log_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_log_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -929,6 +989,9 @@ ngx_http_lua_log_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * log_by_lua_file/log_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_log_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -1011,6 +1074,9 @@ ngx_http_lua_log_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * header_filter_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_header_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1030,6 +1096,10 @@ ngx_http_lua_header_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * header_filter_by_lua/header_filter_by_lua_file 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_header_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1111,6 +1181,9 @@ ngx_http_lua_header_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * body_filter_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_body_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1130,6 +1203,10 @@ ngx_http_lua_body_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * body_filter_by_lua/body_filter_by_lua_file 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_body_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1213,6 +1290,9 @@ ngx_http_lua_body_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_init_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1232,6 +1312,9 @@ ngx_http_lua_init_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_by_lua/init_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1291,6 +1374,9 @@ ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_worker_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_init_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1310,6 +1396,9 @@ ngx_http_lua_init_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_worker_by_lua/init_worker_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1361,6 +1450,9 @@ ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * exit_worker_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_exit_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1380,6 +1472,9 @@ ngx_http_lua_exit_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * exit_worker_by_lua/exit_worker_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_exit_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1971,6 +2066,9 @@ ngx_http_lua_conf_read_lua_token(ngx_conf_t *cf,
 }
 
 
+/**
+ * lua_capture_error_log 配置指令解析
+ */
 char *
 ngx_http_lua_capture_error_log(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)

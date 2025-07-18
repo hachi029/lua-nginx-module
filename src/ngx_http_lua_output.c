@@ -19,6 +19,11 @@ static int ngx_http_lua_ngx_echo(lua_State *L, unsigned newline);
 static void ngx_http_lua_flush_cleanup(void *data);
 
 
+/**
+ * ngx.print
+ * 
+ * syntax: ok, err = ngx.print(...)
+ */
 static int
 ngx_http_lua_ngx_print(lua_State *L)
 {
@@ -27,6 +32,13 @@ ngx_http_lua_ngx_print(lua_State *L)
 }
 
 
+/**
+ * ngx.say
+ * 
+ * syntax: ok, err = ngx.say(...)
+ * 
+ * 与ngx.print不同的是，ngx.say会在内容结束增加一个换行符'\n'
+ */
 static int
 ngx_http_lua_ngx_say(lua_State *L)
 {
@@ -35,6 +47,11 @@ ngx_http_lua_ngx_say(lua_State *L)
 }
 
 
+/**
+ * ngx.print
+ * 
+ * syntax: ok, err = ngx.print(...)
+ */
 static int
 ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
 {
@@ -62,34 +79,42 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
         return luaL_error(L, "no request ctx found");
     }
 
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
                                | NGX_HTTP_LUA_CONTEXT_CONTENT);
 
+    //如果已经调用过ngx.req.socket()方法了
     if (ctx->acquired_raw_req_socket) {
         lua_pushnil(L);
         lua_pushliteral(L, "raw request socket acquired");
         return 2;
     }
 
+    //header_only, 不允许发送响应体
     if (r->header_only) {
         lua_pushnil(L);
         lua_pushliteral(L, "header only");
         return 2;
     }
 
+    //已经发送过eof了
     if (ctx->eof) {
         lua_pushnil(L);
         lua_pushliteral(L, "seen eof");
         return 2;
     }
 
+    //参数个数
     nargs = lua_gettop(L);
+    //计算要发送的响应体长度
     size = 0;
 
+    //遍历ngx.print(...)的每个参数
     for (i = 1; i <= nargs; i++) {
 
+        //参数类型
         type = lua_type(L, i);
 
         switch (type) {
@@ -121,6 +146,7 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
 
             case LUA_TTABLE:
 
+                //计算table的长度
                 size += ngx_http_lua_calc_strlen_in_table(L, i, i,
                                                           0 /* strict */);
                 break;
@@ -146,11 +172,14 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
         }
     }
 
+    //是否发送一个换行符
     if (newline) {
         size += sizeof("\n") - 1;
     }
 
+    //size==0， 标识空的响应体
     if (size == 0) {
+        //仅仅调用send_header
         rc = ngx_http_lua_send_header_if_needed(r, ctx);
         if (rc == NGX_ERROR || rc > NGX_OK) {
             lua_pushnil(L);
@@ -164,6 +193,7 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
 
     ctx->seen_body_data = 1;
 
+    // 获取一个ngx_chain_t， 同时申请一个len大小的ngx_buf_t，挂载到ngx_chain_t上
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
                                          &ctx->free_bufs, size);
 
@@ -171,6 +201,7 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
         return luaL_error(L, "no memory");
     }
 
+    //向b中写入内容
     b = cl->buf;
 
     for (i = 1; i <= nargs; i++) {
@@ -237,6 +268,7 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    newline ? "lua say response" : "lua print response");
 
+    //发送响应
     rc = ngx_http_lua_send_chain_link(r, ctx, cl);
 
     if (rc == NGX_ERROR || rc >= NGX_HTTP_SPECIAL_RESPONSE) {
@@ -258,6 +290,11 @@ ngx_http_lua_ngx_echo(lua_State *L, unsigned newline)
 }
 
 
+/**
+ * 计算指定位置的table序列化后的长度，为以后分配内存做准备
+ * 
+ * table只能为array
+ */
 size_t
 ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
     unsigned strict)
@@ -276,12 +313,13 @@ ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
 
     dd("table index: %d", index);
 
-    max = 0;
+    max = 0;        //记录最大的index索引
 
     lua_pushnil(L); /* stack: table key */
     while (lua_next(L, index) != 0) { /* stack: table key value */
         dd("key type: %s", luaL_typename(L, -2));
 
+        //key为number
         if (lua_type(L, -2) == LUA_TNUMBER) {
 
             key = lua_tonumber(L, -2);
@@ -298,6 +336,7 @@ ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
             }
         }
 
+        //不支持key为非number的情况
         /* not an array (non positive integer key) */
         lua_pop(L, 2); /* stack: table */
 
@@ -307,7 +346,9 @@ ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
 
     size = 0;
 
+    //遍历table
     for (i = 1; i <= max; i++) {
+        //获取t[i],将值推入栈顶
         lua_rawgeti(L, index, i); /* stack: table value */
         type = lua_type(L, -1);
 
@@ -347,6 +388,7 @@ ngx_http_lua_calc_strlen_in_table(lua_State *L, int index, int arg_i,
 
             case LUA_TTABLE:
 
+                //如果value是table, 则递归
                 size += ngx_http_lua_calc_strlen_in_table(L, -1, arg_i, strict);
                 break;
 
@@ -379,6 +421,10 @@ bad_type:
 }
 
 
+/**
+ * 将栈中的table序列化，存入dst指向的位置
+ * 注意：table只能为序列, 且置序列化值，所有值之间没有分隔符。类似与table.concat(t, '')
+ */
 u_char *
 ngx_http_lua_copy_str_in_table(lua_State *L, int index, u_char *dst)
 {
@@ -395,6 +441,7 @@ ngx_http_lua_copy_str_in_table(lua_State *L, int index, u_char *dst)
 
     max = 0;
 
+    //找到最大的array索引index
     lua_pushnil(L); /* stack: table key */
     while (lua_next(L, index) != 0) { /* stack: table key value */
         key = lua_tonumber(L, -2);
@@ -405,26 +452,31 @@ ngx_http_lua_copy_str_in_table(lua_State *L, int index, u_char *dst)
         lua_pop(L, 1); /* stack: table key */
     }
 
+    //从1开始遍历序列表
     for (i = 1; i <= max; i++) {
         lua_rawgeti(L, index, i); /* stack: table value */
         type = lua_type(L, -1);
         switch (type) {
             case LUA_TNUMBER:
+                //将指定位置的值格式化为num，输出到dst
                 dst = ngx_http_lua_write_num(L, -1, dst);
                 break;
 
             case LUA_TSTRING:
+                //string
                 p = (u_char *) lua_tolstring(L, -1, &len);
                 dst = ngx_copy(dst, p, len);
                 break;
 
             case LUA_TNIL:
+                //nil
                 *dst++ = 'n';
                 *dst++ = 'i';
                 *dst++ = 'l';
                 break;
 
             case LUA_TBOOLEAN:
+                //boolean
                 if (lua_toboolean(L, -1)) {
                     *dst++ = 't';
                     *dst++ = 'r';
@@ -442,6 +494,7 @@ ngx_http_lua_copy_str_in_table(lua_State *L, int index, u_char *dst)
                 break;
 
             case LUA_TTABLE:
+                //table: 递归遍历
                 dst = ngx_http_lua_copy_str_in_table(L, -1, dst);
                 break;
 
@@ -677,6 +730,9 @@ ngx_http_lua_ngx_eof(lua_State *L)
 }
 
 
+/**
+ * api注入
+ */
 void
 ngx_http_lua_inject_output_api(lua_State *L)
 {
@@ -698,6 +754,10 @@ ngx_http_lua_inject_output_api(lua_State *L)
 
 
 /**
+ * ngx.send_headers
+ * 
+ * 通常没必要手动调用此函数，ngx.say or ngx.print 或 content_by_lua 会自动调用
+ * 
  * Send out headers
  * */
 static int
@@ -717,6 +777,7 @@ ngx_http_lua_ngx_send_headers(lua_State *L)
         return luaL_error(L, "no ctx found");
     }
 
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
@@ -725,6 +786,7 @@ ngx_http_lua_ngx_send_headers(lua_State *L)
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua send headers");
 
+    //根据条件判断是否调用 ngx_http_send_header
     rc = ngx_http_lua_send_header_if_needed(r, ctx);
     if (rc == NGX_ERROR || rc > NGX_OK) {
         lua_pushnil(L);

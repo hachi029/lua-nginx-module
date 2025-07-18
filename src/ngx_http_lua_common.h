@@ -105,6 +105,7 @@ typedef struct {
 #   define NGX_HTTP_LUA_MAX_ARGS 100
 #endif
 
+//ngx.resp.get_headers/ngx.req.get_headers 获取的最大的header数量
 #ifndef NGX_HTTP_LUA_MAX_HEADERS
 #   define NGX_HTTP_LUA_MAX_HEADERS 100
 #endif
@@ -201,26 +202,37 @@ typedef struct {
 } ngx_http_lua_thread_ref_t;
 
 
+/**
+ * ngx_http_lua_module 在main级别的配置结构体
+ * */
 struct ngx_http_lua_main_conf_s {
+    //ngx_http_lua_init 阶段创建的，注入了ngx.* api
     lua_State           *lua;
+    //lua_State 清理函数 ngx_http_lua_cleanup_vm， 用于关闭 lua_State
     ngx_pool_cleanup_t  *vm_cleanup;
 
+    //配置指令lua_package_path的值
     ngx_str_t            lua_path;
+    //配置指令lua_package_cpath的值
     ngx_str_t            lua_cpath;
 
     ngx_cycle_t         *cycle;
     ngx_pool_t          *pool;
 
+    //配置指令值 lua_max_pending_timers
     ngx_int_t            max_pending_timers;
     ngx_int_t            pending_timers;
 
+    //配置指令值 lua_max_running_timers
     ngx_int_t            max_running_timers;
     ngx_int_t            running_timers;
 
     ngx_connection_t    *watcher;  /* for watching the process exit event */
 
+    //配置指令值 lua_thread_cache_max_entries
     ngx_int_t            lua_thread_cache_max_entries;
 
+    //ngx_http_lua_set_handlers 数组组成的hash表
     ngx_hash_t           builtin_headers_out;
 
 #if (NGX_PCRE)
@@ -243,7 +255,9 @@ struct ngx_http_lua_main_conf_s {
 
     ngx_array_t         *preload_hooks; /* of ngx_http_lua_preload_hook_t */
 
+    //配置指令值 rewrite_by_lua_no_postpone， 默认值0
     ngx_flag_t           postponed_to_rewrite_phase_end;
+    //配置指令值 access_by_lua_no_postpone， 默认值0
     ngx_flag_t           postponed_to_access_phase_end;
 
     ngx_http_lua_main_conf_handler_pt    init_handler;
@@ -291,27 +305,38 @@ struct ngx_http_lua_main_conf_s {
 
 #if (nginx_version >= 1011011)
     /* the following 2 fields are only used by ngx.req.raw_headers() for now */
+    //一个指向ngx_buf_t指针的数组
     ngx_buf_t          **busy_buf_ptrs;
+    //上边的数组长度
     ngx_int_t            busy_buf_ptr_count;
 #endif
 
+    //$host 变量的索引
     ngx_int_t            host_var_index;
 
+    //配置指令 lua_sa_restart 标识
     ngx_flag_t           set_sa_restart;
 
     ngx_queue_t          free_lua_threads;  /* of ngx_http_lua_thread_ref_t */
     ngx_queue_t          cached_lua_threads;  /* of ngx_http_lua_thread_ref_t */
 
+    //配置指令值 lua_worker_thread_vm_pool_size
     ngx_uint_t           worker_thread_vm_pool_size;
 
+    //标识是否配置了header_filter_by_lua指令
     unsigned             requires_header_filter:1;
+    //标识是否配置了body_filter_by_lua指令
     unsigned             requires_body_filter:1;
     unsigned             requires_capture_filter:1;
+    //标识是否配置了rewrite_by_lua指令
     unsigned             requires_rewrite:1;
+    //标识是否配置了access_by_lua指令
     unsigned             requires_access:1;
+    //标识是否配置了log_by_lua指令
     unsigned             requires_log:1;
     unsigned             requires_shm:1;
     unsigned             requires_capture_log:1;
+    //标识是否配置了server_rewrite_by_lua指令
     unsigned             requires_server_rewrite:1;
 };
 
@@ -352,6 +377,7 @@ struct ngx_http_lua_srv_conf_s {
     } srv;
 
     struct {
+        //配置指令值 balancer_keepalive
         ngx_uint_t                           max_cached;
         ngx_queue_t                          cache;
         ngx_queue_t                          free;
@@ -373,24 +399,35 @@ typedef struct {
 #if (NGX_HTTP_SSL)
     ngx_ssl_t              *ssl;  /* shared by SSL cosockets */
     ngx_array_t            *ssl_certificates;
+    //lua_ssl_certificate_key 配置指令的值
     ngx_array_t            *ssl_certificate_keys;
+    //配置指令 lua_ssl_protocols 的值
     ngx_uint_t              ssl_protocols;
+    //配置指令 lua_ssl_ciphers 的值
     ngx_str_t               ssl_ciphers;
+    //配置指令 lua_ssl_verify_depth 的值
     ngx_uint_t              ssl_verify_depth;
+    //配置指令 lua_ssl_trusted_certificate 的值
     ngx_str_t               ssl_trusted_certificate;
+    //配置指令 lua_ssl_crl 的值
     ngx_str_t               ssl_crl;
     ngx_str_t               ssl_key_log;
 #if (nginx_version >= 1019004)
+    //配置指令 lua_ssl_conf_command 的值
     ngx_array_t            *ssl_conf_commands;
 #endif
 #endif
 
+    //lua_need_request_body 配置指令的标识
     ngx_flag_t              force_read_body; /* whether force request body to
                                                 be read */
 
+    //https://openresty-reference.readthedocs.io/en/latest/Directives/#lua_code_cache
+    //lua_code_cache配置指令的标识
     ngx_flag_t              enable_code_cache; /* whether to enable
                                                   code cache */
 
+    //lua_http10_buffering 配置指令标识
     ngx_flag_t              http10_buffering;
 
     ngx_http_handler_pt     rewrite_handler;
@@ -451,18 +488,28 @@ typedef struct {
     int                              body_filter_src_ref;
 
     ngx_msec_t                       keepalive_timeout;
+    //配置指令 lua_socket_connect_timeout
     ngx_msec_t                       connect_timeout;
+    //配置指令 lua_socket_send_timeout
     ngx_msec_t                       send_timeout;
+    //配置指令 lua_socket_read_timeout
     ngx_msec_t                       read_timeout;
 
+    //配置指令 lua_socket_send_lowat
     size_t                           send_lowat;
+    //配置指令 lua_socket_buffer_size
     size_t                           buffer_size;
 
+    //配置指令 lua_socket_pool_size
     ngx_uint_t                       pool_size;
 
+    //lua_transform_underscores_in_response_headers 配置指令标识
     ngx_flag_t                       transform_underscores_in_resp_headers;
+    //lua_socket_log_errors 配置指令标识
     ngx_flag_t                       log_socket_errors;
+    //lua_check_client_abort 配置指令标识
     ngx_flag_t                       check_client_abort;
+    //lua_use_default_type 配置指令标识
     ngx_flag_t                       use_default_type;
 } ngx_http_lua_loc_conf_t;
 
@@ -501,12 +548,16 @@ struct ngx_http_lua_co_ctx_s {
 
     ngx_http_cleanup_pt      cleanup;
 
+    //存放多个子请求响应status的指针
     ngx_int_t               *sr_statuses; /* all capture subrequest statuses */
 
+    //存放多个子请求响应headers的指针
     ngx_http_headers_out_t **sr_headers;
 
+    //存放多个子请求响应体的指针
     ngx_str_t               *sr_bodies;   /* all captured subrequest bodies */
 
+    //存放多个子请求flags的指针
     uint8_t                 *sr_flags;
 
     unsigned                 nresults_from_worker_thread;  /* number of results
@@ -514,9 +565,11 @@ struct ngx_http_lua_co_ctx_s {
                                                             * thread callback */
     unsigned                 nrets;     /* ngx_http_lua_run_thread nrets arg. */
 
+    //子请求数量
     unsigned                 nsubreqs;  /* number of subrequests of the
                                          * current request */
 
+    //等待结束的子请求数量
     unsigned                 pending_subreqs; /* number of subrequests being
                                                  waited */
 
@@ -564,10 +617,13 @@ struct ngx_http_lua_co_ctx_s {
 
 typedef struct {
     lua_State       *vm;
-    ngx_int_t        count;
+    ngx_int_t        count;     //引用次数
 } ngx_http_lua_vm_state_t;
 
 
+/**
+ * ngx_http_lua_module 上下文结构体
+ */
 typedef struct ngx_http_lua_ctx_s {
     /* for lua_code_cache off: */
     ngx_http_lua_vm_state_t  *vm_state;
@@ -587,6 +643,7 @@ typedef struct ngx_http_lua_ctx_s {
     ngx_http_lua_co_ctx_t   *on_abort_co_ctx; /* coroutine context for the
                                                  on_abort thread */
 
+    //ngx.ctx变量的索引。在lua层有个ctxs数组，此ctx_ref记录了本次请求的ngx.ctx在ctxs数组中的索引
     int                      ctx_ref;  /*  reference to anchor
                                            request ctx data in lua
                                            registry */
@@ -611,15 +668,19 @@ typedef struct ngx_http_lua_ctx_s {
 
     ngx_chain_t            **last_body; /* for the "body" field */
 
+    //调用ngx.exec() 函数设置的uri
     ngx_str_t                exec_uri;
+     //调用ngx.exec() 函数设置的args
     ngx_str_t                exec_args;
 
+    //响应状态码
     ngx_int_t                exit_code;
 
     void                    *downstream;  /* can be either
                                              ngx_http_lua_socket_tcp_upstream_t
                                              or ngx_http_lua_co_ctx_t */
 
+    //子请求在父请求的所有子请求中的索引
     ngx_uint_t               index;              /* index of the current
                                                     subrequest in its parent
                                                     request */
@@ -632,6 +693,7 @@ typedef struct ngx_http_lua_ctx_s {
                                            (or running phase) for the current
                                            Lua chunk */
 
+    //标识子请求是否已经执行过ngx_http_lua_post_subrequest(子请求执行结束后的回调方法)了
     unsigned                 run_post_subrequest:1; /* whether it has run
                                                        post_subrequest
                                                        (for subrequests only) */
@@ -644,6 +706,7 @@ typedef struct ngx_http_lua_ctx_s {
 
     unsigned         exited:1;
 
+    //标识是否已经发送了eof了
     unsigned         eof:1;             /*  1: last_buf has been sent;
                                             0: last_buf not sent yet */
 
@@ -653,12 +716,15 @@ typedef struct ngx_http_lua_ctx_s {
                                      0: not to be captured */
 
 
+    //是否已经全部读取了请求体
     unsigned         read_body_done:1;      /* 1: request body has been all
                                                read; 0: body has not been
                                                all read */
 
+    //是否通过ngx.header.HEADER api重新设置了响应头，参考ngx_http_lua_ffi_set_resp_header方法
     unsigned         headers_set:1; /* whether the user has set custom
                                        response headers */
+    //是否通过ngx.header.HEADER api重新设置了 Content-Type 响应头
     unsigned         mime_set:1;    /* whether the user has set Content-Type
                                        response header */
     unsigned         entered_server_rewrite_phase:1;
@@ -671,6 +737,7 @@ typedef struct ngx_http_lua_ctx_s {
     unsigned         no_abort:1; /* prohibit "world abortion" via ngx.exit()
                                     and etc */
 
+    //标识header是否已经发送了
     unsigned         header_sent:1; /* r->header_sent is not sufficient for
                                      * this because special header filters
                                      * like ngx_image_filter may intercept
@@ -682,6 +749,7 @@ typedef struct ngx_http_lua_ctx_s {
     unsigned         seen_last_for_subreq:1; /* used by body capture filter */
     unsigned         writing_raw_req_socket:1; /* used by raw downstream
                                                   socket */
+    //标识是否已经调用过ngx.req.socket()方法了
     unsigned         acquired_raw_req_socket:1;  /* whether a raw req socket
                                                     is acquired */
     unsigned         seen_body_data:1;
@@ -698,9 +766,17 @@ struct ngx_http_lua_header_val_s {
 };
 
 
+/**
+ * 参考 ngx_http_lua_set_handlers 数组
+ * 代表一个需要预处理的请求头
+ * 在发起子请求时，会复制所有父请求的请求头。对于一些预定义的请求头，调用handler方法进行额外处理
+ */
 typedef struct {
+    //header key
     ngx_str_t                               name;
+    //当前header在ngx_http_headers_in_t中字段offset；如 offsetof(ngx_http_headers_in_t, host)
     ngx_uint_t                              offset;
+    //handler。
     ngx_http_lua_set_header_pt              handler;
 } ngx_http_lua_set_header_t;
 

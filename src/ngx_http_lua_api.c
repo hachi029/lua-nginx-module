@@ -16,6 +16,10 @@
 #include "ngx_http_lua_util.h"
 
 
+/**
+ * 在Lua中，每个协程对应有一个lua_State结构体， 这个结构体中保存了协程的所有信息。
+ * 所有的协程共享一个global_State结构体，这个结构体保存全局相关的一些信息，主要是所有需要垃圾回收的对象。
+ */
 lua_State *
 ngx_http_lua_get_global_state(ngx_conf_t *cf)
 {

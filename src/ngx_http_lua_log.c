@@ -25,6 +25,9 @@ static void ngx_http_lua_inject_log_consts(lua_State *L);
 
 
 /**
+ * ngx.log
+ */
+/**
  * Wrapper of nginx log functionality. Take a log level param and varargs of
  * log message params.
  *
@@ -48,6 +51,7 @@ ngx_http_lua_ngx_log(lua_State *L)
         log = ngx_cycle->log;
     }
 
+    //日志级别
     level = luaL_checkint(L, 1);
     if (level < NGX_LOG_STDERR || level > NGX_LOG_DEBUG) {
         msg = lua_pushfstring(L, "bad log level: %d", level);
@@ -61,6 +65,13 @@ ngx_http_lua_ngx_log(lua_State *L)
 }
 
 
+/**
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#print
+ * 
+ * 覆盖了lua的print函数
+ * 
+ * print 和ngx.log一样，只是使用了固定的日志级别 NGX_LOG_NOTICE
+ */
 /**
  * Override Lua print function, output message to nginx error logs. Equal to
  * ngx.log(ngx.NOTICE, ...).
@@ -87,6 +98,10 @@ ngx_http_lua_print(lua_State *L)
 }
 
 
+/**
+ * ident: log message prefix, usually "[lua] "
+ * level: log level, one of NGX_LOG_*
+ */
 static int
 log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
     lua_State *L)
@@ -101,6 +116,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
     const char          *msg;
     lua_Debug            ar;
 
+    //检查日志级别
     if (level > log->log_level) {
         return 0;
     }
@@ -131,8 +147,11 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
 
 #endif
 
+    //参数个数
     nargs = lua_gettop(L);
 
+    //2025/07/03 21:19:24 [info] 14346#9957737: *2 [lua] init_worker1.lua:8: log(): xxhealthy 123123, context: ngx.timer
+    //size 计算日志长度： 文件名+:+行号+: 
     size = name.len + NGX_INT_T_LEN + sizeof(":: ") - 1;
 
     if (*ar.namewhat != '\0' && *ar.what == 'L') {
@@ -194,15 +213,20 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
 
     buf = lua_newuserdata(L, size);
 
+    //复制lua文件名 init_worker1.lua
     p = ngx_copy(buf, name.data, name.len);
 
+    //init_worker1.lua:
     *p++ = ':';
 
+    //复制当前行号 init_worker1.lua:8
     p = ngx_snprintf(p, NGX_INT_T_LEN, "%d",
                      ar.currentline > 0 ? ar.currentline : ar.linedefined);
 
+    //分隔符init_worker1.lua:8: 
     *p++ = ':'; *p++ = ' ';
 
+    //方法名init_worker1.lua:8: log(): 
     if (*ar.namewhat != '\0' && *ar.what == 'L') {
         p = ngx_copy(p, ar.name, src_len);
         *p++ = '(';
@@ -211,6 +235,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
         *p++ = ' ';
     }
 
+    //复制参数
     for (i = 1; i <= nargs; i++) {
         type = lua_type(L, i);
         switch (type) {
@@ -270,25 +295,37 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
                           (int) size);
     }
 
+    //输出日志
     ngx_log_error(level, log, 0, "%s%*s", ident, (size_t) (p - buf), buf);
 
     return 0;
 }
 
 
+/**
+ * 注入日志API到Lua全局环境中
+ * ngx.log和全局的print函数
+ *
+ */
 void
 ngx_http_lua_inject_log_api(lua_State *L)
 {
+    //注入日志级别常量到Lua全局环境中
     ngx_http_lua_inject_log_consts(L);
 
+    //ngx.log
     lua_pushcfunction(L, ngx_http_lua_ngx_log);
     lua_setfield(L, -2, "log");
 
+    //全局的print函数
     lua_pushcfunction(L, ngx_http_lua_print);
     lua_setglobal(L, "print");
 }
 
 
+/**
+ * 注入日志级别常量到Lua全局环境中
+ */
 static void
 ngx_http_lua_inject_log_consts(lua_State *L)
 {

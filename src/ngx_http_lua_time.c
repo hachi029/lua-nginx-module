@@ -25,6 +25,9 @@ ngx_http_lua_ffi_now(void)
 }
 
 
+/**
+ * ngx.req.start_time
+ */
 double
 ngx_http_lua_ffi_req_start_time(ngx_http_request_t *r)
 {

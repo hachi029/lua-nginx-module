@@ -22,6 +22,9 @@ static void ngx_http_lua_sleep_cleanup(void *data);
 static ngx_int_t ngx_http_lua_sleep_resume(ngx_http_request_t *r);
 
 
+/**
+ * ngx.sleep
+ */
 static int
 ngx_http_lua_ngx_sleep(lua_State *L)
 {
@@ -31,6 +34,7 @@ ngx_http_lua_ngx_sleep(lua_State *L)
     ngx_http_lua_ctx_t          *ctx;
     ngx_http_lua_co_ctx_t       *coctx;
 
+    //参数个数
     n = lua_gettop(L);
     if (n != 1) {
         return luaL_error(L, "attempt to pass %d arguments, but accepted 1", n);
@@ -41,6 +45,7 @@ ngx_http_lua_ngx_sleep(lua_State *L)
         return luaL_error(L, "no request found");
     }
 
+    //睡眠时间
     delay = (ngx_int_t) (luaL_checknumber(L, 1) * 1000);
 
     if (delay < 0) {
@@ -52,6 +57,7 @@ ngx_http_lua_ngx_sleep(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
+    //检查是否允许sleep
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE);
 
     coctx = ctx->cur_co_ctx;
@@ -138,6 +144,9 @@ ngx_http_lua_sleep_handler(ngx_event_t *ev)
 }
 
 
+/**
+ * ngx api注入
+ */
 void
 ngx_http_lua_inject_sleep_api(lua_State *L)
 {

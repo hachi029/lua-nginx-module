@@ -22,6 +22,9 @@ static ngx_int_t ngx_http_lua_access_by_chunk(lua_State *L,
     ngx_http_request_t *r);
 
 
+/*
+* 如果配置了access_by_lua指令， 安装一个ACCESS_PHASE的handler
+*/
 ngx_int_t
 ngx_http_lua_access_handler(ngx_http_request_t *r)
 {

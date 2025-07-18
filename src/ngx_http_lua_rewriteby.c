@@ -21,6 +21,9 @@ static ngx_int_t ngx_http_lua_rewrite_by_chunk(lua_State *L,
     ngx_http_request_t *r);
 
 
+/**
+ * 如果配置了rewrite_by_lua指令， 安装一个REWRITE_PHASE的handler
+ * */
 ngx_int_t
 ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
 {
@@ -142,6 +145,7 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
         return NGX_DONE;
     }
 
+    //如果配置了需要读取请求体，但还没有读取
     if (llcf->force_read_body && !ctx->read_body_done) {
         r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;

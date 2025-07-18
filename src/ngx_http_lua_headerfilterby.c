@@ -290,6 +290,9 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
 }
 
 
+/**
+ * 如果配置了header_filter_by_lua指令， 安装ngx_http_lua_header_filter
+ * */
 ngx_int_t
 ngx_http_lua_header_filter_init(void)
 {

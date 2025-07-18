@@ -52,6 +52,9 @@ static u_char *ngx_http_lua_log_timer_error(ngx_log_t *log, u_char *buf,
 static void ngx_http_lua_abort_pending_timers(ngx_event_t *ev);
 
 
+/**
+ * 注入ngx.timer.*相关api
+ */
 void
 ngx_http_lua_inject_timer_api(lua_State *L)
 {

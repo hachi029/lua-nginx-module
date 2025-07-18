@@ -78,6 +78,9 @@ ngx_http_lua_ssl_sess_fetch_handler_inline(ngx_http_request_t *r,
 }
 
 
+/**
+ * ssl_session_fetch_by_lua_block配置指令解析
+ */
 char *
 ngx_http_lua_ssl_sess_fetch_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -97,6 +100,9 @@ ngx_http_lua_ssl_sess_fetch_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * ssl_session_fetch_by_lua_file配置指令解析
+ */
 /* conf parser for directive ssl_session_fetch_by_lua */
 char *
 ngx_http_lua_ssl_sess_fetch_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,

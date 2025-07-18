@@ -27,6 +27,7 @@ static ngx_int_t ngx_http_lua_capture_body_filter(ngx_http_request_t *r,
     ngx_chain_t *in);
 
 
+//安装一个header filter和一个body filter
 ngx_int_t
 ngx_http_lua_capture_filter_init(ngx_conf_t *cf)
 {
