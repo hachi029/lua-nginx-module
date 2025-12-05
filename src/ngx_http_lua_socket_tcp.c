@@ -233,23 +233,35 @@ static char ngx_http_lua_pattern_udata_metatable_key;
     "__tcp_raw_req_cosocket_mt"
 
 
+/**
+ * 注入ngx.socket.* tcp 相关api
+ * 
+ * https://blog.csdn.net/liu0808/article/details/84061345
+ * 
+ */
 void
 ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
 {
     ngx_int_t         rc;
 
+    //创建 ngx.socket 表
     lua_createtable(L, 0, 4 /* nrec */);    /* ngx.socket */
 
     lua_pushcfunction(L, ngx_http_lua_socket_tcp);
+    //   3 -1    ngx_http_lua_socket_tcp
+    //   2 -2    ngx_http_lua_socket_tcp
+    //   1 -3    {} 
     lua_pushvalue(L, -1);
     lua_setfield(L, -3, "tcp");
     lua_setfield(L, -2, "stream");
 
+    //   1 -1    {"tcp"=ngx_http_lua_socket_tcp, "stream" = ngx_http_lua_socket_tcp} 
     {
         const char  buf[] = "local sock = ngx.socket.tcp()"
                             " local ok, err = sock:connect(...)"
                             " if ok then return sock else return nil, err end";
 
+        //载入并编译内存中的一段Lua代码，然后作为一个代码块(称为chunk)压入栈中/
         rc = luaL_loadbuffer(L, buf, sizeof(buf) - 1, "=ngx.socket.connect");
     }
 
@@ -259,15 +271,23 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
                       rc);
 
     } else {
+        //syntax: tcpsock, err = ngx.socket.connect(host, port)
+        // "ngx.socket.connect"="local sock ...."
         lua_setfield(L, -2, "connect");
     }
 
+    //设置ngx.socket socket={"tcp"="", "stream"="", connect="local socket ..."}
     lua_setfield(L, -2, "socket");
 
+    // lua_pushlightuserdata(L, &ngx_http_lua_req_socket_metatable_key);
     /* {{{req socket object metatable */
     lua_pushlightuserdata(L, ngx_http_lua_lightudata_mask(
                           req_socket_metatable_key));
     lua_createtable(L, 0 /* narr */, 6 /* nrec */);
+
+    //   3  -1    {}
+    //   2  -2    &ngx_http_lua_req_socket_metatable_key
+    //   1  -3    {"socket"={"tcp"=ngx_http_lua_socket_tcp, "stream" = ngx_http_lua_socket_tcp,  "connect"="local sock ...."}}   
 
     lua_pushcfunction(L, ngx_http_lua_socket_tcp_receive);
     lua_setfield(L, -2, "receive");
@@ -284,11 +304,21 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
     lua_pushcfunction(L, ngx_http_lua_socket_tcp_settimeouts);
     lua_setfield(L, -2, "settimeouts"); /* ngx socket mt */
 
+    //   4  -1    {"receive"=ngx_http_lua_socket_tcp_receive, "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil, "settimeout"=ngx_http_lua_socket_tcp_settimeout, "settimeouts"=ngx_http_lua_socket_tcp_settimeouts}
+    //   3  -2    {"receive"=ngx_http_lua_socket_tcp_receive, "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil, "settimeout"=ngx_http_lua_socket_tcp_settimeout, "settimeouts"=ngx_http_lua_socket_tcp_settimeouts}
+    //   2  -3    ngx_http_lua_req_socket_metatable_key
+    //   1  -4    {"socket"={"tcp"=ngx_http_lua_socket_tcp, "stream" = ngx_http_lua_socket_tcp,  "connect"="local sock ...."}}   
+
     lua_pushvalue(L, -1);
+    //   3  -1    {"__index"=this, "receive"=ngx_http_lua_socket_tcp_receive, "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil, "settimeout"=ngx_http_lua_socket_tcp_settimeout, "settimeouts"=ngx_http_lua_socket_tcp_settimeouts}
+    //   2  -2    &ngx_http_lua_req_socket_metatable_key
+    //   1  -3    {"socket"={"tcp"=ngx_http_lua_socket_tcp, "stream" = ngx_http_lua_socket_tcp,  "connect"="local sock ...."}}   
     lua_setfield(L, -2, "__index");
 
+    //直接赋值  LUA_REGISTRYINDEX是Lua注册表的伪索引, 将key为&ngx_http_lua_req_socket_metatable_key设置为栈顶元素
     lua_rawset(L, LUA_REGISTRYINDEX);
 
+    //  1   -1     {"socket"={"tcp"=ngx_http_lua_socket_tcp, "stream" = ngx_http_lua_socket_tcp,  "connect"="local sock ....", "ngx_http_lua_req_socket_metatable_key" = {"__index"=this, "receive"=ngx_http_lua_socket_tcp_receive, "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil, "settimeout"=ngx_http_lua_socket_tcp_settimeout, "settimeouts"=ngx_http_lua_socket_tcp_settimeouts}}}
     lua_pushliteral(L, ngx_http_lua_tcp_req_socket_metatable_literal_key);
     lua_pushlightuserdata(L, ngx_http_lua_lightudata_mask(
                           req_socket_metatable_key));
@@ -414,6 +444,33 @@ ngx_http_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
     lua_pushcfunction(L, ngx_http_lua_socket_cleanup_compiled_pattern);
     lua_setfield(L, -2, "__gc");
     lua_rawset(L, LUA_REGISTRYINDEX);
+
+   //////////////////////////////////////////////////////////////////////
+    //
+    //      {  "socket"={    "tcp"=ngx_http_lua_socket_tcp, "stream" = ngx_http_lua_socket_tcp,"connect"="local sock ...."}, 
+    //         "ngx_http_lua_req_socket_metatable_key" = {"__index"=this, "receive"=ngx_http_lua_socket_tcp_receive, "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil, "settimeout"=ngx_http_lua_socket_tcp_settimeout, "settimeouts"=ngx_http_lua_socket_tcp_settimeouts}
+    //         "ngx_http_lua_raw_req_socket_metatable_key"={ "__index" = this, "receive"=ngx_http_lua_socket_tcp_receive, "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil, "settimeout"=ngx_http_lua_socket_tcp_send,  "settimeouts"=ngx_http_lua_socket_tcp_settimeouts}
+    //          "ngx_http_lua_tcp_socket_metatable_key"=
+    //                                                   { 
+    //                                                        "__index"=this,
+    //                                                       "connect"=ngx_http_lua_socket_tcp_connect, 
+    //                                                       "sslhandshake"=ngx_http_lua_socket_tcp_sslhandshake, 
+    //                                                       "receive"=ngx_http_lua_socket_tcp_receive,
+    //                                                       "receiveuntil"=ngx_http_lua_socket_tcp_receiveuntil,
+    //                                                       "send"=ngx_http_lua_socket_tcp_send,
+    //                                                       "close"=ngx_http_lua_socket_tcp_close,
+    //                                                       "setoption"=ngx_http_lua_socket_tcp_setoption,
+    //                                                       "settimeout"=ngx_http_lua_socket_tcp_settimeout,
+    //                                                       "settimeouts"=ngx_http_lua_socket_tcp_settimeouts,
+    //                                                       "getreusedtimes"=ngx_http_lua_socket_tcp_getreusedtimes,
+    //                                                       "setkeepalive"=ngx_http_lua_socket_tcp_setkeepalive
+    //                                                    },
+    //         "ngx_http_lua_upstream_udata_metatable_key"={"__gc" = ngx_http_lua_socket_tcp_upstream_destroy},
+    //         "ngx_http_lua_downstream_udata_metatable_key"={"__gc" = ngx_http_lua_socket_downstream_destroy},
+    //         "ngx_http_lua_pool_udata_metatable_key"={"__gc" = ngx_http_lua_socket_shutdown_pool},
+    //         "ngx_http_lua_pattern_udata_metatable_key"={"__gc" = ngx_http_lua_socket_cleanup_compiled_pattern},
+    //         "ngx_http_lua_ssl_session_metatable_key"={"__gc" = ngx_http_lua_ssl_free_session}
+    //       }
     /* }}} */
 }
 
@@ -426,6 +483,10 @@ ngx_http_lua_inject_req_socket_api(lua_State *L)
 }
 
 
+/**
+ * syntax: tcpsock = ngx.socket.tcp()
+ * syntax: tcpsock = ngx.socket.stream()
+ */
 static int
 ngx_http_lua_socket_tcp(lua_State *L)
 {
@@ -453,6 +514,7 @@ ngx_http_lua_socket_tcp(lua_State *L)
     lua_pushlightuserdata(L, ngx_http_lua_lightudata_mask(
                           tcp_socket_metatable_key));
     lua_rawget(L, LUA_REGISTRYINDEX);
+    // 在创建table的同时给这个table设置了一个元表，将socket需要执行的connect，send，receive等方法放在了元表中
     lua_setmetatable(L, -2);
 
     dd("top: %d", lua_gettop(L));
@@ -461,6 +523,13 @@ ngx_http_lua_socket_tcp(lua_State *L)
 }
 
 
+/**
+ * 创建连接池(ngx.socket.tcp场景)。创建并初始化结构体 ngx_http_lua_socket_pool_t
+ * key: 连接池名称
+ * pool_size: 连接池内连接数量
+ * backlog: 排队长度
+ * spool: 出参
+ */
 static void
 ngx_http_lua_socket_tcp_create_socket_pool(lua_State *L, ngx_http_request_t *r,
     ngx_str_t key, ngx_int_t pool_size, ngx_int_t backlog,
@@ -522,24 +591,36 @@ ngx_http_lua_socket_tcp_create_socket_pool(lua_State *L, ngx_http_request_t *r,
     ngx_queue_init(&sp->cache);
     ngx_queue_init(&sp->free);
 
+    //拷贝key
     p = ngx_copy(sp->key, key.data, key.len);
     *p++ = '\0';
 
+    //连接池数组
     items = (ngx_http_lua_socket_pool_item_t *) (sp->key + key_len);
 
     dd("items: %p", items);
 
     ngx_http_lua_assert((void *) items == ngx_align_ptr(items, sizeof(void *)));
 
+    //将所有的ngx_http_lua_socket_pool_item_t放到sp->free中组成一个双向队列
     for (i = 0; i < pool_size; i++) {
         ngx_queue_insert_head(&sp->free, &items[i].queue);
         items[i].socket_pool = sp;
     }
 
+    //返回参数
     *spool = sp;
 }
 
 
+/**
+ * ngx.socket.tcp:connect
+ * 
+ * 可能从连接池中获取到了一条可用连接，立即返回
+ * 可能连接池上连接已达到上限，立即返回(当设置了backlog)
+ * 可能需要在连接池上等待可用连接(当设置了backlog)
+ * 可能创建一条新连接
+ */
 static int
 ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
     ngx_http_lua_socket_tcp_upstream_t *u, ngx_http_request_t *r,
@@ -560,26 +641,35 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
     ngx_http_lua_socket_pool_t            *spool;
     ngx_http_lua_socket_tcp_conn_op_ctx_t *conn_op_ctx;
 
+    //检查是否指定了连接池；
+    //指定了，就从连接池中取出 keepalive 连接，取到了就直接返回。这里会限制连接池中总连接数不能超过 连接池大小 size + backlog。
+    //如果超过了 size，但小于 size + backlog，意味着是 backlog 连接，从 backlog 队列的从中取出或创建连接操作上下文（ngx_http_lua_socket_tcp_conn_op_ctx_t）放到队列中。
     spool = u->socket_pool;
+    //有连接池
     if (spool != NULL) {
+        //1.尝试从连接池中获取连接
         rc = ngx_http_lua_get_keepalive_peer(r, u);
 
+        //1.1成功获取到一条可用连接
         if (rc == NGX_OK) {
             lua_pushinteger(L, 1);
             return 1;
         }
 
         /* rc == NGX_DECLINED */
+        //连接池为空，无可用连接
 
         spool->connections++;
 
         /* check if backlog is enabled and
          * don't queue resuming connection operation */
+        //如果启用了backlog,表示要限制连接总数
         if (spool->backlog >= 0 && !resuming) {
 
             dd("lua tcp socket %s connections %ld",
                spool->key, spool->connections);
 
+            //1.2当前连接数量已超限制，且排队队列也满了，立即返回
             if (spool->connections > spool->size + spool->backlog) {
                 spool->connections--;
                 lua_pushnil(L);
@@ -587,6 +677,7 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
                 return 2;
             }
 
+            //1.3当前连接数量已超限制，但排队队列没满，需要wait
             if (spool->connections > spool->size) {
                 ngx_log_debug2(NGX_LOG_DEBUG_HTTP, u->peer.log, 0,
                                "lua tcp socket queue connect operation for "
@@ -596,26 +687,32 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
                 host_size = sizeof(u_char) *
                     (ngx_max(host_len, NGX_INET_ADDRSTRLEN) + 1);
 
+                //先尝试从spool->cache_connect_op队列中获取一个可用的ngx_http_lua_socket_tcp_conn_op_ctx_t结构体
                 if (!ngx_queue_empty(&spool->cache_connect_op)) {
+                    //最后一个元素
                     q = ngx_queue_last(&spool->cache_connect_op);
                     ngx_queue_remove(q);
                     conn_op_ctx = ngx_queue_data(
                         q, ngx_http_lua_socket_tcp_conn_op_ctx_t, queue);
 
                     conn_op_host = &conn_op_ctx->host;
+                    //如果新的host长度大于conn_op_host，则申请新的空间
                     if (host_len > conn_op_host->len
                         && host_len > NGX_INET_ADDRSTRLEN)
                     {
                         ngx_free(conn_op_host->data);
+                        //申请新的空间
                         conn_op_host->data = ngx_alloc(host_size,
                                                        ngx_cycle->log);
                         if (conn_op_host->data == NULL) {
                             ngx_free(conn_op_ctx);
+                            //内存申请失败
                             goto no_memory_and_not_resuming;
                         }
                     }
 
                 } else {
+                    //没有可用的，创建一个新的ngx_http_lua_socket_tcp_conn_op_ctx_t
                     conn_op_ctx = ngx_alloc(
                         sizeof(ngx_http_lua_socket_tcp_conn_op_ctx_t),
                         ngx_cycle->log);
@@ -624,6 +721,7 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
                     }
 
                     conn_op_host = &conn_op_ctx->host;
+                    //申请存放host的空间
                     conn_op_host->data = ngx_alloc(host_size, ngx_cycle->log);
                     if (conn_op_host->data == NULL) {
                         ngx_free(conn_op_ctx);
@@ -647,13 +745,16 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
                 ctx->cur_co_ctx->data = conn_op_ctx;
 
                 ngx_memzero(&conn_op_ctx->event, sizeof(ngx_event_t));
+                //等待获取连接超时的回调
                 conn_op_ctx->event.handler =
                     ngx_http_lua_socket_tcp_conn_op_timeout_handler;
                 conn_op_ctx->event.data = conn_op_ctx;
                 conn_op_ctx->event.log = ngx_cycle->log;
 
+                //添加到定时器中，超时时间为连接超时时间
                 ngx_add_timer(&conn_op_ctx->event, u->connect_timeout);
 
+                //添加到spool->wait_connect_op尾部
                 ngx_queue_insert_tail(&spool->wait_connect_op,
                                       &conn_op_ctx->queue);
 
@@ -668,6 +769,9 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
 
     } /* end spool != NULL */
 
+    //2. 需要创建一条新的连接
+
+    //分配内存存 host，用于通过 ngx_parse_url 创建 sockaddr。
     host.data = ngx_palloc(r->pool, host_len + 1);
     if (host.data == NULL) {
         return luaL_error(L, "no memory");
@@ -681,10 +785,12 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
     ngx_memzero(&url, sizeof(ngx_url_t));
     url.url = host;
     url.default_port = port;
+    //不解析url，避免阻塞
     url.no_resolve = 1;
 
     coctx = ctx->cur_co_ctx;
 
+    //解析url
     if (ngx_parse_url(r->pool, &url) != NGX_OK) {
         lua_pushnil(L);
 
@@ -703,8 +809,10 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua tcp socket connect timeout: %M", u->connect_timeout);
 
+    //远端地址
     u->resolved = ngx_pcalloc(r->pool, sizeof(ngx_http_upstream_resolved_t));
     if (u->resolved == NULL) {
+        //内存申请失败
         if (resuming) {
             lua_pushnil(L);
             lua_pushliteral(L, "no memory");
@@ -714,6 +822,7 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
         goto no_memory_and_not_resuming;
     }
 
+    //如果已经解析出了地址
     if (url.addrs && url.addrs[0].sockaddr) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "lua tcp socket network address given directly");
@@ -728,8 +837,11 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
         u->resolved->port = url.default_port;
     }
 
+    //解析出了地址，不需要dns解析了
     if (u->resolved->sockaddr) {
+        //发起连接
         rc = ngx_http_lua_socket_resolve_retval_handler(r, u, L);
+        //rc == NGX_AGAIN 表示连接建立中
         if (rc == NGX_AGAIN && !resuming) {
             return lua_yield(L, 0);
         }
@@ -741,9 +853,12 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
         return rc;
     }
 
+    /*需要执行DNS解析*/
+
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
     temp.name = host;
+    //进行域名解析。
     rctx = ngx_resolve_start(clcf->resolver, &temp);
     if (rctx == NULL) {
         u->ft_type |= NGX_HTTP_LUA_SOCKET_FT_RESOLVER;
@@ -760,6 +875,7 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
     }
 
     rctx->name = host;
+    //解析完成后的回调
     rctx->handler = ngx_http_lua_socket_resolve_handler;
     rctx->data = u;
     rctx->timeout = clcf->resolver_timeout;
@@ -767,12 +883,15 @@ ngx_http_lua_socket_tcp_connect_helper(lua_State *L,
     u->resolved->ctx = rctx;
     u->write_co_ctx = ctx->cur_co_ctx;
 
+    // 如果coctx->cleanup不为null，则执行之
     ngx_http_lua_cleanup_pending_operation(coctx);
+    //挂载cleanup
     coctx->cleanup = ngx_http_lua_tcp_resolve_cleanup;
     coctx->data = u;
 
     saved_top = lua_gettop(L);
 
+    //解析域名
     if (ngx_resolve_name(rctx) != NGX_OK) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "lua tcp socket fail to run resolver immediately");
@@ -925,6 +1044,10 @@ ngx_http_lua_socket_tcp_bind(lua_State *L)
 }
 
 
+/**
+ * syntax: ok, err = tcpsock:connect(host, port, options_table?)
+ * 
+ */
 static int
 ngx_http_lua_socket_tcp_connect(lua_State *L)
 {
@@ -949,26 +1072,32 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
 
     ngx_http_lua_socket_pool_t              *spool;
 
+    //参数个数
     n = lua_gettop(L);
     if (n != 2 && n != 3 && n != 4) {
         return luaL_error(L, "ngx.socket connect: expecting 2, 3, or 4 "
                           "arguments (including the object), but seen %d", n);
     }
 
+    //获取请求
     r = ngx_http_lua_get_req(L);
     if (r == NULL) {
         return luaL_error(L, "no request found");
     }
 
+    //获取模块上下文结构体
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     if (ctx == NULL) {
         return luaL_error(L, "no ctx found");
     }
 
+    //检查执行阶段
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*, ngx.timer.*, ssl_certificate_by_lua*, ssl_session_fetch_by_lua*, ssl_client_hello_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE);
 
     luaL_checktype(L, 1, LUA_TTABLE);
 
+    //host
     p = (u_char *) luaL_checklstring(L, 2, &len);
 
     backlog = -1;
@@ -977,12 +1106,15 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
     custom_pool = 0;
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
+    //n为参数个数，表示最后的opts参数表
+    //处理参数 pool_size/backlog/pool
     if (lua_type(L, n) == LUA_TTABLE) {
 
         /* found the last optional option table */
 
         lua_getfield(L, n, "pool_size");
 
+        //pool_size， 连接池大小
         if (lua_isnumber(L, -1)) {
             pool_size = (ngx_int_t) lua_tointeger(L, -1);
 
@@ -1000,6 +1132,7 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
 
         lua_pop(L, 1);
 
+        //backlog 限制连接数，当总连接数达到pool_size时，再获取连接需要再backlog大小的队列中等待可用连接
         lua_getfield(L, n, "backlog");
 
         if (lua_isnumber(L, -1)) {
@@ -1013,12 +1146,14 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
 
             /* use default value for pool size if only backlog specified */
             if (pool_size == 0) {
+                //默认使用 lua_socket_pool_size 配置指令的值
                 pool_size = llcf->pool_size;
             }
         }
 
         lua_pop(L, 1);
 
+        //连接池的名字
         lua_getfield(L, n, "pool");
 
         switch (lua_type(L, -1)) {
@@ -1056,6 +1191,7 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
         n--;
     }
 
+    // 检查 port，不合法就退出，报错退出。
     /* most popular suit: host:port */
     if (n == 3 && lua_isnumber(L, 3)) {
 
@@ -1073,9 +1209,11 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
             return 2;
         }
 
+        //如果没有指定pool名称，则自动生成一个
         if (!custom_pool) {
             lua_pushliteral(L, ":");
             lua_insert(L, 3);
+            //host:port
             lua_concat(L, 3);
         }
 
@@ -1111,6 +1249,8 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
         lua_rawseti(L, 1, SOCKET_KEY_INDEX);
     }
 
+    //取出 upstream_t， 如果没有就分配一个并设置到 tcp 对象的 SOCKET_CTX_INDEX；如果有了，就检查这个上游对象的有效性，有效就复用。
+    //ngx_http_lua_socket_tcp_upstream_t 
     lua_rawgeti(L, 1, SOCKET_CTX_INDEX);
     u = lua_touserdata(L, -1);
     lua_pop(L, 1);
@@ -1139,6 +1279,7 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
                        "lua reuse socket upstream ctx");
 
     } else {
+        //没有u, 创建一个
         u = lua_newuserdata(L, sizeof(ngx_http_lua_socket_tcp_upstream_t));
         if (u == NULL) {
             return luaL_error(L, "no memory");
@@ -1154,6 +1295,7 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
         lua_rawseti(L, 1, SOCKET_CTX_INDEX);
     }
 
+    //把拿到的上游对象初始化一下：清空，设置相关字段。
     ngx_memzero(u, sizeof(ngx_http_lua_socket_tcp_upstream_t));
 
     u->request = r; /* set the controlling request */
@@ -1181,6 +1323,7 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
         u->peer.local = local;
     }
 
+    //超时时间， 把超时参数从 TCP 对象中取出压入栈中，设置超时到上游对象的连接超时、发送超时、读取超时字段中
     lua_rawgeti(L, 1, SOCKET_CONNECT_TIMEOUT_INDEX);
     lua_rawgeti(L, 1, SOCKET_SEND_TIMEOUT_INDEX);
     lua_rawgeti(L, 1, SOCKET_READ_TIMEOUT_INDEX);
@@ -1212,6 +1355,8 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
         u->read_timeout = u->conf->read_timeout;
     }
 
+    //根据 pool 参数或者 host:port 为 key 取出对应连接池，如果有就直接用；
+    //如果没有，就创建（ngx_http_lua_socket_tcp_create_socket_pool）这个连接池。
     lua_pushlightuserdata(L, ngx_http_lua_lightudata_mask(socket_pool_key));
     lua_rawget(L, LUA_REGISTRYINDEX); /* table */
     lua_pushvalue(L, key_index); /* key */
@@ -1227,16 +1372,21 @@ ngx_http_lua_socket_tcp_connect(lua_State *L)
         lua_pushvalue(L, key_index);
         key.data = (u_char *) lua_tolstring(L, -1, &key.len);
 
+        //创建连接池，创建并初始化结构体 ngx_http_lua_socket_pool_t
         ngx_http_lua_socket_tcp_create_socket_pool(L, r, key, pool_size,
                                                    backlog, &spool);
         u->socket_pool = spool;
     }
 
+    //建立连接
     return ngx_http_lua_socket_tcp_connect_helper(L, u, r, ctx, p,
                                                   len, port, 0);
 }
 
 
+/**
+ * ngx.socket.tcp:connect 域名解析完成的回调
+ */
 static void
 ngx_http_lua_socket_resolve_handler(ngx_resolver_ctx_t *ctx)
 {
@@ -1447,6 +1597,10 @@ ngx_http_lua_socket_init_peer_connection_addr_text(ngx_peer_connection_t *pc)
 }
 
 
+/**
+ * 解析出ip地址了，正式发起连接
+ * 返回 NGX_AGAIN 表示连接建立中
+ */
 static int
 ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u, lua_State *L)
@@ -1470,6 +1624,7 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
 
     ur = u->resolved;
 
+    //如果有就是解析成功了，没有就是解析失败了，报错返回。
     if (ur->sockaddr) {
         pc->sockaddr = ur->sockaddr;
         pc->socklen = ur->socklen;
@@ -1483,9 +1638,11 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
 
     pc->get = ngx_http_lua_socket_tcp_get_peer;
 
+    //进行connect发起连接
     rc = ngx_event_connect_peer(pc);
 
     if (rc == NGX_ERROR) {
+        //连接出错了
         u->socket_errno = ngx_socket_errno;
     }
 
@@ -1506,11 +1663,13 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua tcp socket connect: %i", rc);
 
+    //连接失败
     if (rc == NGX_ERROR) {
         return ngx_http_lua_socket_conn_error_retval_handler(r, u, L);
     }
 
     if (rc == NGX_BUSY) {
+        //没有存活连接
         u->ft_type |= NGX_HTTP_LUA_SOCKET_FT_ERROR;
         lua_pushnil(L);
         lua_pushliteral(L, "no live connection");
@@ -1518,24 +1677,37 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
     }
 
     if (rc == NGX_DECLINED) {
+        //socket 错误。
         dd("socket errno: %d", (int) ngx_socket_errno);
         u->ft_type |= NGX_HTTP_LUA_SOCKET_FT_ERROR;
         u->socket_errno = ngx_socket_errno;
         return ngx_http_lua_socket_conn_error_retval_handler(r, u, L);
     }
 
+    /** 接下来就是连接中或者连接成功的情况了 */
     /* rc == NGX_OK || rc == NGX_AGAIN */
 
+    //NGX_OK表示连接成功，NGX_AGAIN标示未连接成功，需要等待；
+    //如果没连接成功，会注册`ngx_http_lua_socket_connected_handler()`，
+    //如果连接成功，则注册`ngx_http_lua_socket_dummy_handler()`，这是一个空函数。
+
+    //connection对象，事件循环的主要处理对象
     c = pc->connection;
 
+    //将connection对象的data设置为这个upstream，这样当有事件触发时，
+    //能通过data获取到upstream，从而获取到对应的处理函数。
     c->data = u;
 
+    //读写事件触发的处理函数
     c->write->handler = ngx_http_lua_socket_tcp_handler;
     c->read->handler = ngx_http_lua_socket_tcp_handler;
 
+    //不同操作注册不同的处理函数，这里是connected handler，如果是socket.send
+    //则为ngx_http_lua_socket_send_handler()
     u->write_event_handler = ngx_http_lua_socket_connected_handler;
     u->read_event_handler = ngx_http_lua_socket_connected_handler;
 
+    //设置sendfile标志位
     c->sendfile &= r->connection->sendfile;
 
     if (c->pool == NULL) {
@@ -1567,6 +1739,7 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
 
     dd("setting data to %p", u);
 
+    //连接建立成功
     if (rc == NGX_OK) {
         ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                        "lua tcp socket connected: fd:%d", (int) c->fd);
@@ -1576,6 +1749,7 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
          * on the Lua land, thus causing hot spin around level triggered
          * event poll and wasting CPU cycles. */
 
+        //添加可写事件监听
         if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
             ngx_http_lua_socket_handle_conn_error(r, u,
                                                   NGX_HTTP_LUA_SOCKET_FT_ERROR);
@@ -1584,6 +1758,7 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
             return 2;
         }
 
+        //添加可读事件监听
         if (ngx_handle_read_event(c->read, 0) != NGX_OK) {
             ngx_http_lua_socket_handle_conn_error(r, u,
                                                   NGX_HTTP_LUA_SOCKET_FT_ERROR);
@@ -1600,11 +1775,13 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
     }
 
     /* rc == NGX_AGAIN */
+    //表示连接还没有建立成功，需要等待
 
     ngx_http_lua_cleanup_pending_operation(coctx);
     coctx->cleanup = ngx_http_lua_coctx_cleanup;
     coctx->data = u;
 
+    //注册连接超时事件监听。此时的写事件处理函数为 ngx_http_lua_socket_tcp_handler
     ngx_add_timer(c->write, u->connect_timeout);
 
     u->write_co_ctx = ctx->cur_co_ctx;
@@ -1624,6 +1801,9 @@ ngx_http_lua_socket_resolve_retval_handler(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.socket.tcp() 建立连接失败
+ */
 static int
 ngx_http_lua_socket_conn_error_retval_handler(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u, lua_State *L)
@@ -2119,6 +2299,12 @@ ngx_http_lua_socket_read_error_retval_handler(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx_http_lua_socket_tcp_send->.
+ * 
+ * ngx.socket.tcp:send发送出错时的处理方法
+ * 
+ */
 static int
 ngx_http_lua_socket_write_error_retval_handler(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u, lua_State *L)
@@ -2928,6 +3114,9 @@ success:
 }
 
 
+/**
+ * ngx.socket.tcp:send()
+ */
 static int
 ngx_http_lua_socket_tcp_send(lua_State *L)
 {
@@ -2967,6 +3156,7 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
 
     dd("tcp send: u=%p, u->write_closed=%d", u, (unsigned) u->write_closed);
 
+    //先检查连接还在不在，不在就报错返回。
     if (u == NULL || u->peer.connection == NULL || u->write_closed) {
         llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
@@ -2983,10 +3173,12 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
         return 2;
     }
 
+    //检查是不是想要写请求对应的 socket（ngx.req.socket），是的话，报错返回，不允许写。
     if (u->request != r) {
         return luaL_error(L, "bad request");
     }
 
+    //(u)->conn_waiting
     ngx_http_lua_socket_check_busy_connecting(r, u, L);
     ngx_http_lua_socket_check_busy_writing(r, u, L);
 
@@ -2997,6 +3189,7 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
     ngx_log_debug1(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua tcp socket send timeout: %M", u->send_timeout);
 
+    //计算要发送字符串长度len
     type = lua_type(L, 2);
     switch (type) {
         case LUA_TNUMBER:
@@ -3041,6 +3234,7 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
 
+    //获取一个ngx_chain_t， 同时申请一个len大小的ngx_buf_t，挂载到ngx_chain_t上
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
                                          &ctx->free_bufs, len);
 
@@ -3048,6 +3242,7 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
         return luaL_error(L, "no memory");
     }
 
+    //把要发送的数据写入获取到的 buffer 中。
     b = cl->buf;
 
     switch (type) {
@@ -3104,6 +3299,7 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
     c = u->peer.connection;
 
+    //选项设置。
     if (clcf->tcp_nodelay && c->tcp_nodelay == NGX_TCP_NODELAY_UNSET) {
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
                        "lua socket tcp_nodelay");
@@ -3136,20 +3332,24 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
 
     ngx_http_lua_probe_socket_tcp_send_start(r, u, b->pos, len);
 
+    //如果当前socket缓冲区已满，此时rc == NGX_AGAIN
     rc = ngx_http_lua_socket_send(r, u);
 
     dd("socket send returned %d", (int) rc);
 
+    //如果是出错，就进行错误处理，然后返回 NGX_ERROR
     if (rc == NGX_ERROR) {
         return ngx_http_lua_socket_write_error_retval_handler(r, u, L);
     }
 
+    //发送完成
     if (rc == NGX_OK) {
         lua_pushinteger(L, len);
         return 1;
     }
 
     /* rc == NGX_AGAIN */
+    //还在发送中
 
     coctx = ctx->cur_co_ctx;
 
@@ -3161,6 +3361,7 @@ ngx_http_lua_socket_tcp_send(lua_State *L)
         ctx->writing_raw_req_socket = 1;
     }
 
+    //等到socket的缓冲区空闲，此时socket可写，会调用r->write_event_handler继续运行
     if (ctx->entered_content_phase) {
         r->write_event_handler = ngx_http_lua_content_wev_handler;
 
@@ -3428,6 +3629,10 @@ ngx_http_lua_socket_tcp_settimeouts(lua_State *L)
 }
 
 
+/**
+ * ngx.socket.tcp中连接的读写事件的handler
+ * 封装了connect/send/receive等不同操作，统一提供给事件模块调用
+ */
 static void
 ngx_http_lua_socket_tcp_handler(ngx_event_t *ev)
 {
@@ -3509,6 +3714,9 @@ ngx_http_lua_socket_read_handler(ngx_http_request_t *r,
 }
 
 
+/**
+ * tcp:send()方法，connection上可写事件处理函数
+ */
 static void
 ngx_http_lua_socket_send_handler(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u)
@@ -3521,6 +3729,7 @@ ngx_http_lua_socket_send_handler(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua tcp socket send handler");
 
+    //如果写超时
     if (c->write->timedout) {
         llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
@@ -3534,12 +3743,18 @@ ngx_http_lua_socket_send_handler(ngx_http_request_t *r,
         return;
     }
 
+    //如果还有待发送数据
     if (u->request_bufs) {
         (void) ngx_http_lua_socket_send(r, u);
     }
 }
 
 
+/**
+ * 发送u->request_bufs
+ * 返回：NGX_OK， 发送完成
+ *      NGX_AGAIN, 缓冲区已满
+ */
 static ngx_int_t
 ngx_http_lua_socket_send(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u)
@@ -3554,6 +3769,7 @@ ngx_http_lua_socket_send(ngx_http_request_t *r,
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua tcp socket send data");
 
+    //获取模块上下文结构体
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     if (ctx == NULL) {
         ngx_http_lua_socket_handle_write_error(r, u,
@@ -3561,23 +3777,28 @@ ngx_http_lua_socket_send(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    //要发送的数据
     b = u->request_bufs->buf;
 
     for (;;) {
+        //进行发送，如果发送失败或者阻塞了，就立即退出死循环；否则就一直发送到发送完为止。
         n = c->send(c, b->pos, b->last - b->pos);
 
         if (n >= 0) {
             b->pos += n;
 
+            //发送完了所有的数据
             if (b->pos == b->last) {
                 ngx_log_debug0(NGX_LOG_DEBUG_HTTP, c->log, 0,
                                "lua tcp socket sent all the data");
 
+                //移除发送超时定时器
                 if (c->write->timer_set) {
                     ngx_del_timer(c->write);
                 }
 
 
+                //
                 ngx_chain_update_chains(r->pool,
                                         &ctx->free_bufs, &u->busy_bufs,
                                         &u->request_bufs,
@@ -3585,6 +3806,7 @@ ngx_http_lua_socket_send(ngx_http_request_t *r,
 
                 u->write_event_handler = ngx_http_lua_socket_dummy_handler;
 
+                //将可写事件监听加入epoll
                 if (ngx_handle_write_event(c->write, 0) != NGX_OK) {
                     ngx_http_lua_socket_handle_write_error(r, u,
                                                 NGX_HTTP_LUA_SOCKET_FT_ERROR);
@@ -3603,6 +3825,7 @@ ngx_http_lua_socket_send(ngx_http_request_t *r,
         break;
     }
 
+    //出错了就进行错误处理并返回
     if (n == NGX_ERROR) {
         c->error = 1;
         u->socket_errno = ngx_socket_errno;
@@ -3611,16 +3834,20 @@ ngx_http_lua_socket_send(ngx_http_request_t *r,
         return NGX_ERROR;
     }
 
+    //内核发送缓冲区已满,需要等待
     /* n == NGX_AGAIN */
 
     if (u->raw_downstream) {
         ctx->writing_raw_req_socket = 1;
     }
 
+    //可写事件处理函数
     u->write_event_handler = ngx_http_lua_socket_send_handler;
 
+    //添加超时检测
     ngx_add_timer(c->write, u->send_timeout);
 
+    //加入epool监听
     if (ngx_handle_write_event(c->write, u->conf->send_lowat) != NGX_OK) {
         ngx_http_lua_socket_handle_write_error(r, u,
                                                NGX_HTTP_LUA_SOCKET_FT_ERROR);
@@ -3706,6 +3933,11 @@ ngx_http_lua_socket_handle_read_success(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx_http_lua_socket_send->.
+ * 
+ * ngx.socket.tcp:send() 发送完成后调用
+ */
 static void
 ngx_http_lua_socket_handle_write_success(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u)
@@ -3936,6 +4168,10 @@ ngx_http_lua_socket_connected_handler(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.socket.tcp中请求结束的回调函数，这个函数注册到了r->cleanup中
+ * data: 为 ngx_http_lua_socket_tcp_upstream_t
+ */
 static void
 ngx_http_lua_socket_tcp_cleanup(void *data)
 {
@@ -4073,6 +4309,9 @@ ngx_http_lua_socket_tcp_finalize_write_part(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.socket.tcp 建立连接时，等待从连接池中获取连接超时的回调
+ */
 static void
 ngx_http_lua_socket_tcp_conn_op_timeout_handler(ngx_event_t *ev)
 {
@@ -4085,6 +4324,7 @@ ngx_http_lua_socket_tcp_conn_op_timeout_handler(ngx_event_t *ev)
     ngx_http_lua_socket_tcp_conn_op_ctx_t   *conn_op_ctx;
 
     conn_op_ctx = ev->data;
+    //从u->socket_pool->wait_connect_op队列移除
     ngx_queue_remove(&conn_op_ctx->queue);
 
     u = conn_op_ctx->u;
@@ -4099,14 +4339,17 @@ ngx_http_lua_socket_tcp_conn_op_timeout_handler(ngx_event_t *ev)
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
     if (llcf->log_socket_errors) {
+        //排队超时
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "lua tcp socket queued connect timed out,"
                       " when trying to connect to %V:%ud",
                       &conn_op_ctx->host, conn_op_ctx->port);
     }
 
+    //回收ngx_http_lua_socket_tcp_conn_op_ctx_t结构体
     ngx_queue_insert_head(&u->socket_pool->cache_connect_op,
                           &conn_op_ctx->queue);
+    //等待获取连接的数量-1
     u->socket_pool->connections--;
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
@@ -4172,10 +4415,12 @@ ngx_http_lua_socket_tcp_resume_conn_op(ngx_http_lua_socket_pool_t *spool)
      * operation resumption, so that there is no resumption happens when Nginx
      * is exiting.
      */
+    //如果没有等待获取连接的请求
     if (ngx_queue_empty(&spool->wait_connect_op)) {
         return;
     }
 
+    //从等待队列中拿到首个元素
     q = ngx_queue_head(&spool->wait_connect_op);
     conn_op_ctx = ngx_queue_data(q, ngx_http_lua_socket_tcp_conn_op_ctx_t,
                                  queue);
@@ -4185,6 +4430,7 @@ ngx_http_lua_socket_tcp_resume_conn_op(ngx_http_lua_socket_pool_t *spool)
                    "connections: %i",
                    conn_op_ctx->u, conn_op_ctx, spool->key, spool->connections);
 
+    //移除设置的等待超时定时器
     if (conn_op_ctx->event.timer_set) {
         ngx_del_timer(&conn_op_ctx->event);
     }
@@ -4214,6 +4460,9 @@ ngx_http_lua_socket_tcp_conn_op_ctx_cleanup(void *data)
 }
 
 
+/**
+ * 从连接池中等待获取连接，获取到连接后执行的逻辑
+ */
 static void
 ngx_http_lua_socket_tcp_conn_op_resume_handler(ngx_event_t *ev)
 {
@@ -4329,6 +4578,7 @@ ngx_http_lua_socket_tcp_conn_op_resume_retval_handler(ngx_http_request_t *r,
                                                   conn_op_ctx->host.data,
                                                   conn_op_ctx->host.len,
                                                   conn_op_ctx->port, 1);
+    //回收ngx_http_lua_socket_tcp_conn_op_ctx_t结构体
     ngx_queue_insert_head(&u->socket_pool->cache_connect_op,
                           &conn_op_ctx->queue);
 
@@ -4336,6 +4586,9 @@ ngx_http_lua_socket_tcp_conn_op_resume_retval_handler(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.socket.tcp 连接回收函数
+ */
 static void
 ngx_http_lua_socket_tcp_finalize(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u)
@@ -4354,7 +4607,9 @@ ngx_http_lua_socket_tcp_finalize(ngx_http_request_t *r,
         u->cleanup = NULL;
     }
 
+    //移除读超时定时器，移除读事件监听
     ngx_http_lua_socket_tcp_finalize_read_part(r, u);
+    //移除写超时定时器，移除写事件监听
     ngx_http_lua_socket_tcp_finalize_write_part(r, u);
 
     if (u->input_filter_ctx != NULL && u->input_filter_ctx != u) {
@@ -4400,6 +4655,7 @@ ngx_http_lua_socket_tcp_finalize(ngx_http_request_t *r,
 
         spool->connections--;
 
+        //释放连接池 spool
         if (spool->connections == 0) {
             ngx_http_lua_socket_free_pool(r->connection->log, spool);
             return;
@@ -4410,6 +4666,9 @@ ngx_http_lua_socket_tcp_finalize(ngx_http_request_t *r,
 }
 
 
+/**
+ * 关闭连接
+ */
 static void
 ngx_http_lua_socket_tcp_close_connection(ngx_connection_t *c)
 {
@@ -5081,6 +5340,11 @@ ngx_http_lua_socket_cleanup_compiled_pattern(lua_State *L)
 }
 
 
+/**
+ * ngx.req.socket()
+ * 
+ * tcpsock, err = ngx.req.socket(raw?)
+ */
 static int
 ngx_http_lua_req_socket(lua_State *L)
 {
@@ -5100,6 +5364,7 @@ ngx_http_lua_req_socket(lua_State *L)
     if (n == 0) {
         raw = 0;
 
+    //可以接收一个raw参数，如果为1，返回的是一个全双工的socket(既可以读也可以写)
     } else if (n == 1) {
         raw = lua_toboolean(L, 1);
         lua_pop(L, 1);
@@ -5111,6 +5376,7 @@ ngx_http_lua_req_socket(lua_State *L)
 
     r = ngx_http_lua_get_req(L);
 
+    //只能为主请求
     if (r != r->main) {
         return luaL_error(L, "attempt to read the request body in a "
                           "subrequest");
@@ -5134,6 +5400,7 @@ ngx_http_lua_req_socket(lua_State *L)
     }
 #endif
 
+    //非全双工模式，不支持chunked请求
     if (!raw && r->headers_in.chunked) {
         lua_pushnil(L);
         lua_pushliteral(L, "chunked request bodies not supported yet");
@@ -5145,6 +5412,7 @@ ngx_http_lua_req_socket(lua_State *L)
         return luaL_error(L, "no ctx found");
     }
 
+    //context: rewrite_by_lua*, access_by_lua*, content_by_lua*
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE
                                | NGX_HTTP_LUA_CONTEXT_ACCESS
@@ -5152,7 +5420,9 @@ ngx_http_lua_req_socket(lua_State *L)
 
     c = r->connection;
 
+    //双工模式
     if (raw) {
+        //正在读取请求体
         if (r->request_body) {
             if (r->request_body->rest > 0) {
                 lua_pushnil(L);
@@ -5192,6 +5462,7 @@ ngx_http_lua_req_socket(lua_State *L)
 
         dd("ctx acquired raw req socket: %d", ctx->acquired_raw_req_socket);
 
+        //检查是否已经调用过ngx.req.socket()方法了
         if (ctx->acquired_raw_req_socket) {
             lua_pushnil(L);
             lua_pushliteral(L, "duplicate call");
@@ -5203,14 +5474,17 @@ ngx_http_lua_req_socket(lua_State *L)
         r->lingering_close = 1;
 
     } else {
+        //非全双工， 用于读取请求体
         /* request body reader */
 
+        //已经读取过了
         if (r->request_body) {
             lua_pushnil(L);
             lua_pushliteral(L, "request body already exists");
             return 2;
         }
 
+        //请求体已经丢弃了
         if (r->discard_body) {
             lua_pushnil(L);
             lua_pushliteral(L, "request body discarded");
@@ -5219,12 +5493,14 @@ ngx_http_lua_req_socket(lua_State *L)
 
         dd("req content length: %d", (int) r->headers_in.content_length_n);
 
+        //没有请求体
         if (r->headers_in.content_length_n <= 0) {
             lua_pushnil(L);
             lua_pushliteral(L, "no body");
             return 2;
         }
 
+        //检查expect请求头
         if (ngx_http_lua_test_expect(r) != NGX_OK) {
             lua_pushnil(L);
             lua_pushliteral(L, "test expect failed");
@@ -5658,6 +5934,11 @@ ngx_http_lua_socket_tcp_setkeepalive(lua_State *L)
 }
 
 
+/**
+ * 从连接池中获取一条连接
+ * 返回 NGX_OK: 表示成功获取到了一条可用连接
+ *     NGX_DECLINED：表示连接池为空，暂时没有可用连接
+ */
 static ngx_int_t
 ngx_http_lua_get_keepalive_peer(ngx_http_request_t *r,
     ngx_http_lua_socket_tcp_upstream_t *u)
@@ -5675,13 +5956,18 @@ ngx_http_lua_get_keepalive_peer(ngx_http_request_t *r,
     pc = &u->peer;
     spool = u->socket_pool;
 
+    //如果缓存的可用连接队列不为空
     if (!ngx_queue_empty(&spool->cache)) {
+        //获取首个元素
         q = ngx_queue_head(&spool->cache);
 
         item = ngx_queue_data(q, ngx_http_lua_socket_pool_item_t, queue);
+        //获取到连接结果体
         c = item->connection;
 
+        //将其从spool->cache中移除
         ngx_queue_remove(q);
+        //加入到spool->free中
         ngx_queue_insert_head(&spool->free, q);
 
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, pc->log, 0,
@@ -5696,10 +5982,12 @@ ngx_http_lua_get_keepalive_peer(ngx_http_request_t *r,
         c->data = u;
 
 #if 1
+        //设置读写事件的handler
         c->write->handler = ngx_http_lua_socket_tcp_handler;
         c->read->handler = ngx_http_lua_socket_tcp_handler;
 #endif
 
+        //如果设置了读超时，将读超时取消
         if (c->read->timer_set) {
             ngx_del_timer(c->read);
         }
@@ -5707,6 +5995,7 @@ ngx_http_lua_get_keepalive_peer(ngx_http_request_t *r,
         pc->connection = c;
         pc->cached = 1;
 
+        //连接复用次数
         u->reused = item->reused + 1;
         u->udata_queue = item->udata_queue;
         item->udata_queue = NULL;
@@ -5716,6 +6005,7 @@ ngx_http_lua_get_keepalive_peer(ngx_http_request_t *r,
         u->read_event_handler = ngx_http_lua_socket_dummy_handler;
 #endif
 
+        //向r->cleanup注册一个请求结束时的回调函数
         if (u->cleanup == NULL) {
             cln = ngx_http_lua_cleanup_add(r, 0);
             if (cln == NULL) {
@@ -5723,11 +6013,13 @@ ngx_http_lua_get_keepalive_peer(ngx_http_request_t *r,
                 return NGX_ERROR;
             }
 
+            //回调
             cln->handler = ngx_http_lua_socket_tcp_cleanup;
             cln->data = u;
             u->cleanup = &cln->handler;
         }
 
+        //返回
         return NGX_OK;
     }
 
@@ -5821,6 +6113,9 @@ close:
 }
 
 
+/**
+ * 释放连接池 spool
+ */
 static void
 ngx_http_lua_socket_free_pool(ngx_log_t *log, ngx_http_lua_socket_pool_t *spool)
 {
@@ -6163,6 +6458,9 @@ ngx_http_lua_socket_tcp_write_resume(ngx_http_request_t *r)
 }
 
 
+/**
+ * 继续协程的运行
+ */
 static ngx_int_t
 ngx_http_lua_socket_tcp_resume_helper(ngx_http_request_t *r, int socket_op)
 {
@@ -6301,6 +6599,11 @@ ngx_http_lua_tcp_queue_conn_op_cleanup(void *data)
 }
 
 
+/**
+ * coctx->cleanup = ngx_http_lua_tcp_resolve_cleanup;
+ * 
+ * 解析域名时，注册到协程上下文结构体上的cleanup
+ */
 static void
 ngx_http_lua_tcp_resolve_cleanup(void *data)
 {
@@ -6331,6 +6634,11 @@ ngx_http_lua_tcp_resolve_cleanup(void *data)
 }
 
 
+/**
+ * ngx.socket.tcp:send() 方法发送中的cleanup
+ * 
+ * coctx->cleanup = ngx_http_lua_coctx_cleanup;
+ */
 static void
 ngx_http_lua_coctx_cleanup(void *data)
 {

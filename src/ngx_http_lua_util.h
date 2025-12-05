@@ -32,6 +32,7 @@
 
 #define NGX_HTTP_LUA_ESCAPE_HEADER_VALUE  8
 
+//CONTEXT_YIELDABLE: server_rewrite、rewrite、access、content、timer、ssl*
 #define NGX_HTTP_LUA_CONTEXT_YIELDABLE (NGX_HTTP_LUA_CONTEXT_REWRITE         \
                                 | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE        \
                                 | NGX_HTTP_LUA_CONTEXT_ACCESS                \
@@ -42,6 +43,9 @@
                                 | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH)
 
 
+/**
+ *  Lua request ctx data table
+ */
 /* key in Lua vm registry for all the "ngx.ctx" tables */
 #define ngx_http_lua_ctx_tables_key  "ngx_lua_ctx_tables"
 
@@ -76,6 +80,9 @@
     }
 
 
+/**
+ * r->connection->fd==-1视为fake_request
+ */
 #define ngx_http_lua_check_fake_request(L, r)                                \
     if ((r)->connection->fd == (ngx_socket_t) -1) {                          \
         return luaL_error(L, "API disabled in the current context");         \
@@ -99,6 +106,7 @@
     SSL_get_ex_data(ssl_conn, ngx_http_lua_ssl_ctx_index)
 
 
+//计算s哈希值
 #define ngx_http_lua_hash_literal(s)                                         \
     ngx_http_lua_hash_str((u_char *) s, sizeof(s) - 1)
 
@@ -272,10 +280,16 @@ void ngx_http_lua_resume_quic_ssl_handshake(ngx_connection_t *c);
 #endif
 
 
+/**
+ * ngx_http_lua_create_ctx->.
+ * 
+ * 初始化ngx_http_lua_ctx_t
+ */
 static ngx_inline void
 ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
     ngx_memzero(ctx, sizeof(ngx_http_lua_ctx_t));
+    //-2
     ctx->ctx_ref = LUA_NOREF;
     ctx->entry_co_ctx.co_ref = LUA_NOREF;
     ctx->entry_co_ctx.next_zombie_child_thread =
@@ -285,6 +299,11 @@ ngx_http_lua_init_ctx(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 }
 
 
+/**
+ * 创建 ngx_http_lua_module 的上下文结构体
+ * 
+ * 如果关闭了代码缓存，则重新创建lua vm 
+ */
 static ngx_inline ngx_http_lua_ctx_t *
 ngx_http_lua_create_ctx(ngx_http_request_t *r)
 {
@@ -295,15 +314,20 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
     ngx_http_lua_loc_conf_t     *llcf;
     ngx_http_lua_main_conf_t    *lmcf;
 
+    //创建上下文结构体
     ctx = ngx_palloc(r->pool, sizeof(ngx_http_lua_ctx_t));
     if (ctx == NULL) {
         return NULL;
     }
 
+    //初始化相关属性
     ngx_http_lua_init_ctx(r, ctx);
+    //保存ctx
     ngx_http_set_ctx(r, ctx, ngx_http_lua_module);
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
+    //如果配置了lua_code_cache off; 即关闭了lua代码缓存
+    //且当前请求是真实的客户端请求，则重新创建 lmcf->lua
     if (!llcf->enable_code_cache && r->connection->fd != (ngx_socket_t) -1) {
         lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
 
@@ -311,6 +335,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
         dd("lmcf: %p", lmcf);
 #endif
 
+        //为当前请求创建一个新lua_state 并注入ngx.* api，最后赋值给lmcf->lua
         rc = ngx_http_lua_init_vm(&L, lmcf->lua, lmcf->cycle, r->pool, lmcf,
                                   r->connection->log, &cln);
         if (rc != NGX_OK) {
@@ -339,6 +364,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
         ngx_http_lua_assert(L != NULL);
 
         if (lmcf->init_handler) {
+            //执行init_by_lua_*相关代码
             if (lmcf->init_handler(r->connection->log, lmcf, L) != NGX_OK) {
                 /* an error happened */
                 return NULL;
@@ -348,6 +374,7 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
         ctx->vm_state = cln->data;
 
     } else {
+        //不分配新的lua_state,这样所有请求都会使用ngx_http_lua_module模块的lua_state
         ctx->vm_state = NULL;
     }
 
@@ -355,6 +382,11 @@ ngx_http_lua_create_ctx(ngx_http_request_t *r)
 }
 
 
+/**
+ * 获取主协程的lua_State结构体L
+ * 
+ * 如果请求有自己的lua_state在上下文结构体中，则使用请求自己的lua_state，否则使用ngx_http_lua_module模块的lua_state
+ */
 static ngx_inline lua_State *
 ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
@@ -383,6 +415,9 @@ ngx_http_lua_get_lua_vm(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 #endif
 
 
+/**
+ * 从lua_State中获取协程关联的请求
+ */
 static ngx_inline ngx_http_request_t *
 ngx_http_lua_get_req(lua_State *L)
 {
@@ -391,8 +426,11 @@ ngx_http_lua_get_req(lua_State *L)
 #else
     ngx_http_request_t    *r;
 
+    //将全局变量global[“__ngx_req”]压栈
     lua_getglobal(L, ngx_http_lua_req_key);
+    //global[“__ngx_req”]即为light user data类型，将这个指针转为ngx_http_request_t *类型
     r = lua_touserdata(L, -1);
+    //从栈顶弹出一个元素
     lua_pop(L, 1);
 
     return r;
@@ -400,13 +438,22 @@ ngx_http_lua_get_req(lua_State *L)
 }
 
 
+/**
+ * 在每个请求过来后，lua code执行前，都会执行
+ * 
+ * 在创建新的协程后，将相关联的ngx_http_request_t的指针保存在了lua_State的全局变量中
+ * 
+ * 将请求与协程关联
+ */
 static ngx_inline void
 ngx_http_lua_set_req(lua_State *L, ngx_http_request_t *r)
 {
 #ifdef OPENRESTY_LUAJIT
     lua_setexdata(L, (void *) r);
 #else
+    // 将request指针压栈r压栈
     lua_pushlightuserdata(L, r);
+    //将request指针存入全局变量  _G[“__ngx_req”] = r
     lua_setglobal(L, ngx_http_lua_req_key);
 #endif
 }
@@ -422,6 +469,7 @@ ngx_http_lua_attach_co_ctx_to_L(lua_State *L, ngx_http_lua_co_ctx_t *coctx)
 
 
 #ifndef OPENRESTY_LUAJIT
+//将全局表_G放置到栈顶
 static ngx_inline void
 ngx_http_lua_get_globals_table(lua_State *L)
 {
@@ -429,6 +477,7 @@ ngx_http_lua_get_globals_table(lua_State *L)
 }
 
 
+//重新设置_G表
 static ngx_inline void
 ngx_http_lua_set_globals_table(lua_State *L)
 {
@@ -437,6 +486,9 @@ ngx_http_lua_set_globals_table(lua_State *L)
 #endif /* OPENRESTY_LUAJIT */
 
 
+/**
+ * 计算src hash值
+ */
 static ngx_inline ngx_uint_t
 ngx_http_lua_hash_str(u_char *src, size_t n)
 {
@@ -453,6 +505,11 @@ ngx_http_lua_hash_str(u_char *src, size_t n)
 }
 
 
+/**
+ * 设置content_type
+ * 
+ * https://github.com/openresty/lua-nginx-module?tab=readme-ov-file#lua_use_default_type
+ */
 static ngx_inline ngx_int_t
 ngx_http_lua_set_content_type(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
@@ -461,6 +518,7 @@ ngx_http_lua_set_content_type(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
     ctx->mime_set = 1;
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
+    //use_default_type为lua_use_default_type 配置指令值， 默认为on;
     if (llcf->use_default_type
         && r->headers_out.status != NGX_HTTP_NOT_MODIFIED)
     {
@@ -471,6 +529,9 @@ ngx_http_lua_set_content_type(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 }
 
 
+/**
+ * 如果coctx->cleanup不为null，则执行之
+ */
 static ngx_inline void
 ngx_http_lua_cleanup_pending_operation(ngx_http_lua_co_ctx_t *coctx)
 {
@@ -481,17 +542,22 @@ ngx_http_lua_cleanup_pending_operation(ngx_http_lua_co_ctx_t *coctx)
 }
 
 
+/**
+ * 获取一个ngx_chain_t结构体，其buf的flush被置位
+ */
 static ngx_inline ngx_chain_t *
 ngx_http_lua_get_flush_chain(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
 {
     ngx_chain_t  *cl;
 
+    // 获取一个ngx_chain_t， 同时申请一个len大小的ngx_buf_t，挂载到ngx_chain_t上
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
                                          &ctx->free_bufs, 0);
     if (cl == NULL) {
         return NULL;
     }
 
+    //其flush置位为1
     cl->buf->flush = 1;
 
     return cl;
@@ -528,6 +594,13 @@ ngx_inet_get_port(struct sockaddr *sa)
 #endif
 
 
+/**
+ * str是否包含不安全的字符
+ * 
+ * *str：要检测的str
+ * len：要检测的str长度
+ * *byte: 不安全字符，用于输出
+ */
 static ngx_inline ngx_int_t
 ngx_http_lua_check_unsafe_uri_bytes(ngx_http_request_t *r, u_char *str,
     size_t len, u_char *byte)

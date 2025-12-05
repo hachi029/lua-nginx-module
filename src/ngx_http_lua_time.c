@@ -14,6 +14,9 @@
 #include "ngx_http_lua_common.h"
 
 
+/**
+ * syntax: secs = ngx.now()
+ */
 double
 ngx_http_lua_ffi_now(void)
 {
@@ -25,6 +28,9 @@ ngx_http_lua_ffi_now(void)
 }
 
 
+/**
+ * ngx.req.start_time
+ */
 double
 ngx_http_lua_ffi_req_start_time(ngx_http_request_t *r)
 {
@@ -32,6 +38,13 @@ ngx_http_lua_ffi_req_start_time(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.time
+ * syntax: secs = ngx.time()
+ * 
+ * Returns the elapsed seconds from the epoch for the current time stamp from the nginx cached time 
+ * (no syscall involved unlike Lua's date library).
+ */
 long
 ngx_http_lua_ffi_time(void)
 {
@@ -46,6 +59,10 @@ ngx_http_lua_ffi_monotonic_msec(void)
 }
 
 
+/**
+ * ngx.update_time
+ * syntax: ngx.update_time()
+ */
 void
 ngx_http_lua_ffi_update_time(void)
 {
@@ -53,6 +70,12 @@ ngx_http_lua_ffi_update_time(void)
 }
 
 
+/**
+ * ngx.today
+ * syntax: str = ngx.today()
+ * 
+ * Returns current date (in the format yyyy-mm-dd) from the nginx cached time (no syscall involved unlike Lua's date library).
+ */
 void
 ngx_http_lua_ffi_today(u_char *buf)
 {
@@ -65,6 +88,10 @@ ngx_http_lua_ffi_today(u_char *buf)
 }
 
 
+/**
+ * syntax: str = ngx.localtime()
+ * Returns the current time stamp (in the format yyyy-mm-dd hh:mm:ss) of the nginx cached time
+ */
 void
 ngx_http_lua_ffi_localtime(u_char *buf)
 {
@@ -78,6 +105,13 @@ ngx_http_lua_ffi_localtime(u_char *buf)
 }
 
 
+/**
+ * ngx.utctime
+ * syntax: str = ngx.utctime()
+
+ * Returns the current time stamp (in the format yyyy-mm-dd hh:mm:ss) of the nginx cached time
+ * This is the UTC time.
+ */
 void
 ngx_http_lua_ffi_utctime(u_char *buf)
 {
@@ -91,6 +125,17 @@ ngx_http_lua_ffi_utctime(u_char *buf)
 }
 
 
+/**
+ * ngx.cookie_time
+ * syntax: str = ngx.cookie_time(sec)
+ * 
+ * Returns a formatted string can be used as the cookie expiration time.
+ * The parameter sec is the time stamp in seconds (like those returned from ngx.time).
+ * 
+ * ngx.say(ngx.cookie_time(1290079655))
+     -- yields "Thu, 18-Nov-10 11:27:35 GMT"
+
+ */
 int
 ngx_http_lua_ffi_cookie_time(u_char *buf, long t)
 {
@@ -101,6 +146,16 @@ ngx_http_lua_ffi_cookie_time(u_char *buf, long t)
 }
 
 
+/**
+ * ngx.http_time
+ * syntax: str = ngx.http_time(sec)
+ * Returns a formated string can be used as the http header time (for example, being used in Last-Modified header). 
+ * The parameter sec is the time stamp in seconds (like those returned from ngx.time).
+ * 
+ *  ngx.say(ngx.http_time(1290079655))
+     -- yields "Thu, 18 Nov 2010 11:27:35 GMT"
+ * 
+ */
 void
 ngx_http_lua_ffi_http_time(u_char *buf, long t)
 {
@@ -108,6 +163,17 @@ ngx_http_lua_ffi_http_time(u_char *buf, long t)
 }
 
 
+/**
+ * ngx.parse_http_time
+ * syntax: sec = ngx.parse_http_time(str)
+ * Parse the http time string (as returned by ngx.http_time) into seconds. 
+ * Returns the seconds or nil if the input string is in bad forms.
+ * 
+ *  local time = ngx.parse_http_time("Thu, 18 Nov 2010 11:27:35 GMT")
+ *  if time == nil then
+ *      ...
+ *  end
+ */
 void
 ngx_http_lua_ffi_parse_http_time(const u_char *str, size_t len,
     long *time)

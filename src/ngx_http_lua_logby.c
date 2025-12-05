@@ -63,6 +63,11 @@ ngx_http_lua_log_by_lua_env(lua_State *L, ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx_http_lua_init->.
+ * 
+ * 如果配置了log_by_lua指令， 安装一个LOG_PHASE的handler
+ * */
 ngx_int_t
 ngx_http_lua_log_handler(ngx_http_request_t *r)
 {
@@ -87,6 +92,8 @@ ngx_http_lua_log_handler(ngx_http_request_t *r)
 
         trim_nreq = ++lmcf->malloc_trim_req_count;
 
+        //https://github.com/openresty/lua-nginx-module?tab=readme-ov-file#lua_malloc_trim
+        //Asks the underlying libc runtime library to release its cached free memory back to the operating system every N requests
         if (trim_nreq >= trim_cycle) {
             lmcf->malloc_trim_req_count = 0;
 
@@ -136,6 +143,9 @@ ngx_http_lua_log_handler(ngx_http_request_t *r)
 }
 
 
+/**
+ * log_by_lua_block 的cmd->post, 指令解析时被挂载到llcf->rewrite_handler
+ */
 ngx_int_t
 ngx_http_lua_log_handler_inline(ngx_http_request_t *r)
 {

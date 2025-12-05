@@ -18,6 +18,7 @@
 static int ngx_http_lua_ngx_req_is_internal(lua_State *L);
 
 
+//ngx.req.is_internal
 void
 ngx_http_lua_inject_req_misc_api(lua_State *L)
 {
@@ -26,6 +27,10 @@ ngx_http_lua_inject_req_misc_api(lua_State *L)
 }
 
 
+/**
+ * ngx.req.is_internal
+ * 只是读取了r->internal
+ */
 static int
 ngx_http_lua_ngx_req_is_internal(lua_State *L)
 {
@@ -41,6 +46,12 @@ ngx_http_lua_ngx_req_is_internal(lua_State *L)
 }
 
 
+/**
+ * 读取 ngx.status
+ * 
+ * r->headers_out.status
+ * 
+ */
 int
 ngx_http_lua_ffi_get_resp_status(ngx_http_request_t *r)
 {
@@ -63,16 +74,22 @@ ngx_http_lua_ffi_get_resp_status(ngx_http_request_t *r)
 }
 
 
+/**
+ * 设置 ngx.status
+ * syntax: ngx_resp.set_status(status, reason?)
+ */
 int
 ngx_http_lua_ffi_set_resp_status_and_reason(ngx_http_request_t *r, int status,
     const char *reason, size_t reason_len)
 {
     u_char *buf;
 
+    //如果是fake request
     if (r->connection->fd == (ngx_socket_t) -1) {
         return NGX_HTTP_LUA_FFI_BAD_CONTEXT;
     }
 
+    //如果header已经发送了
     if (r->header_sent) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "attempt to set ngx.status after sending out "
@@ -88,6 +105,7 @@ ngx_http_lua_ffi_set_resp_status_and_reason(ngx_http_request_t *r, int status,
         return NGX_DECLINED;
     }
 
+    //直接设置headers_out.status
     r->headers_out.status = status;
 
     if (r->err_status) {
@@ -104,6 +122,7 @@ ngx_http_lua_ffi_set_resp_status_and_reason(ngx_http_request_t *r, int status,
 
     } else if (reason != NULL && reason_len > 0) {
         reason_len += 4; /* "ddd <reason>" */
+        // 构建状态行
         buf = ngx_palloc(r->pool, reason_len);
         if (buf == NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "no memory");
@@ -129,6 +148,9 @@ ngx_http_lua_ffi_set_resp_status(ngx_http_request_t *r, int status)
 }
 
 
+/**
+ * ngx.req.is_internal
+ */
 int
 ngx_http_lua_ffi_req_is_internal(ngx_http_request_t *r)
 {
@@ -140,9 +162,17 @@ ngx_http_lua_ffi_req_is_internal(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.is_subrequest
+ * 
+ * syntax: value = ngx.is_subrequest
+ * 
+ * Returns true if the current request is an nginx subrequest, or false otherwise.
+ */
 int
 ngx_http_lua_ffi_is_subrequest(ngx_http_request_t *r)
 {
+    //fake request
     if (r->connection->fd == (ngx_socket_t) -1) {
         return NGX_HTTP_LUA_FFI_BAD_CONTEXT;
     }
@@ -151,6 +181,10 @@ ngx_http_lua_ffi_is_subrequest(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.headers_sent
+ * 响应头是否已经发送了  r->header_sent
+ */
 int
 ngx_http_lua_ffi_headers_sent(ngx_http_request_t *r)
 {
@@ -169,6 +203,14 @@ ngx_http_lua_ffi_headers_sent(ngx_http_request_t *r)
 }
 
 
+/**
+ * os.getenv(name)
+ * 
+ * *name: 环境变量名称
+ * **env_buf: 出参， 环境变量值 
+ * *name_len: 出参， 环境变量值长度
+ * 
+ */
 int
 ngx_http_lua_ffi_get_conf_env(u_char *name, u_char **env_buf, size_t *name_len)
 {
@@ -181,6 +223,7 @@ ngx_http_lua_ffi_get_conf_env(u_char *name, u_char **env_buf, size_t *name_len)
 
     var = ccf->env.elts;
 
+    //遍历所有的环境变量，根据name查找
     for (i = 0; i < ccf->env.nelts; i++) {
         if (var[i].data[var[i].len] == '='
             && ngx_strncmp(name, var[i].data, var[i].len) == 0)

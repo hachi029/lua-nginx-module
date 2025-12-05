@@ -37,6 +37,9 @@ static int ngx_http_lua_ngx_hmac_sha1(lua_State *L);
 #endif
 
 
+/**
+ * string相关api注入
+ */
 void
 ngx_http_lua_inject_string_api(lua_State *L)
 {
@@ -56,6 +59,12 @@ ngx_http_lua_inject_string_api(lua_State *L)
 }
 
 
+/**
+ * ngx.quote_sql_str
+ * syntax: quoted_value = ngx.quote_sql_str(raw_value)
+ * 
+ * Returns a quoted SQL string literal according to the MySQL quoting rules.
+ */
 static int
 ngx_http_lua_ngx_quote_sql_str(lua_State *L)
 {
@@ -206,6 +215,9 @@ ngx_http_lua_ngx_escape_sql_str(u_char *dst, u_char *src, size_t size)
 }
 
 
+/**
+ * ngx.encode_base64
+ */
 static void
 ngx_http_lua_encode_base64(ngx_str_t *dst, ngx_str_t *src, int no_padding)
 {
@@ -251,6 +263,13 @@ ngx_http_lua_encode_base64(ngx_str_t *dst, ngx_str_t *src, int no_padding)
 }
 
 
+/**
+ * ngx.encode_args
+ * 
+ * syntax: str = ngx.encode_args(table)
+ * 
+ *  ngx.encode_args({baz = {32, "hello"}})   ---- baz=32&baz=hello
+ */
 static int
 ngx_http_lua_ngx_encode_args(lua_State *L)
 {
@@ -261,13 +280,25 @@ ngx_http_lua_ngx_encode_args(lua_State *L)
                           lua_gettop(L));
     }
 
+    //参数只能是table
     luaL_checktype(L, 1, LUA_TTABLE);
     ngx_http_lua_process_args_option(NULL, L, 1, &args);
+    //返回结果
     lua_pushlstring(L, (char *) args.data, args.len);
+    //一个返回参数
     return 1;
 }
 
 
+/**
+ * ngx.decode_args
+ * 
+ * syntax: table = ngx.decode_args(str, max_args?)
+ * 
+ * Decodes a URI encoded query-string into a Lua table
+ * 
+ * max_args: 限制从str中解析出的arg最大个数
+ */
 static int
 ngx_http_lua_ngx_decode_args(lua_State *L)
 {
@@ -279,10 +310,12 @@ ngx_http_lua_ngx_decode_args(lua_State *L)
 
     n = lua_gettop(L);
 
+    //有1个或2个参数
     if (n != 1 && n != 2) {
         return luaL_error(L, "expecting 1 or 2 arguments but seen %d", n);
     }
 
+    //str
     buf = (u_char *) luaL_checklstring(L, 1, &len);
 
     if (n == 2) {
@@ -290,19 +323,27 @@ ngx_http_lua_ngx_decode_args(lua_State *L)
         lua_pop(L, 1);
 
     } else {
+        // 默认值100
         max = NGX_HTTP_LUA_MAX_ARGS;
     }
 
     tmp = lua_newuserdata(L, len);
+    //将str从栈中拷贝到tmp
     ngx_memcpy(tmp, buf, len);
 
     lua_createtable(L, 0, 4);
 
+    //将str解析为table
     return ngx_http_lua_parse_args(L, tmp, tmp + len, max);
 }
 
 
 #if (NGX_OPENSSL)
+/** 
+ * ngx.hmac_sha1
+ * syntax: digest = ngx.hmac_sha1(secret_key, str)
+ * 
+*/
 static int
 ngx_http_lua_ngx_hmac_sha1(lua_State *L)
 {
@@ -331,6 +372,11 @@ ngx_http_lua_ngx_hmac_sha1(lua_State *L)
 #endif
 
 
+/**
+ * ngx.md5_bin
+ * syntax: digest = ngx.md5_bin(str)
+ * 
+ */
 void
 ngx_http_lua_ffi_md5_bin(const u_char *src, size_t len, u_char *dst)
 {
@@ -342,6 +388,10 @@ ngx_http_lua_ffi_md5_bin(const u_char *src, size_t len, u_char *dst)
 }
 
 
+/**
+ * ngx.md5
+ * syntax: digest = ngx.md5(str)
+ */
 void
 ngx_http_lua_ffi_md5(const u_char *src, size_t len, u_char *dst)
 {
@@ -356,6 +406,10 @@ ngx_http_lua_ffi_md5(const u_char *src, size_t len, u_char *dst)
 }
 
 
+/**
+ * ngx.sha1_bin
+ * syntax: digest = ngx.sha1_bin(str)
+ */
 int
 ngx_http_lua_ffi_sha1_bin(const u_char *src, size_t len, u_char *dst)
 {
@@ -373,6 +427,10 @@ ngx_http_lua_ffi_sha1_bin(const u_char *src, size_t len, u_char *dst)
 }
 
 
+/**
+ * ngx.crc32_short
+ * syntax: intval = ngx.crc32_short(str)
+ */
 unsigned int
 ngx_http_lua_ffi_crc32_short(const u_char *src, size_t len)
 {
@@ -380,6 +438,10 @@ ngx_http_lua_ffi_crc32_short(const u_char *src, size_t len)
 }
 
 
+/**
+ * ngx.crc32_long
+ * syntax: intval = ngx.crc32_long(str)
+ */
 unsigned int
 ngx_http_lua_ffi_crc32_long(const u_char *src, size_t len)
 {
@@ -387,6 +449,11 @@ ngx_http_lua_ffi_crc32_long(const u_char *src, size_t len)
 }
 
 
+/**
+ * ngx.encode_base64
+ * 
+ * syntax: newstr = ngx.encode_base64(str, no_padding?)
+ */
 size_t
 ngx_http_lua_ffi_encode_base64(const u_char *src, size_t slen, u_char *dst,
     int no_padding)
@@ -404,6 +471,10 @@ ngx_http_lua_ffi_encode_base64(const u_char *src, size_t slen, u_char *dst,
 }
 
 
+/**
+ * ngx.decode_base64
+ * syntax: newstr = ngx.decode_base64(str)
+ */
 int
 ngx_http_lua_ffi_decode_base64(const u_char *src, size_t slen, u_char *dst,
     size_t *dlen)
@@ -444,6 +515,11 @@ ngx_http_lua_ffi_decode_base64mime(const u_char *src, size_t slen, u_char *dst,
 }
 
 
+/**
+ * ngx.unescape_uri
+ * 
+ * syntax: newstr = ngx.unescape_uri(str)
+ */
 size_t
 ngx_http_lua_ffi_unescape_uri(const u_char *src, size_t len, u_char *dst)
 {
@@ -455,6 +531,11 @@ ngx_http_lua_ffi_unescape_uri(const u_char *src, size_t len, u_char *dst)
 }
 
 
+/**
+ * ngx.escape_uri
+ * 
+ * 计算escaped_length
+ */
 size_t
 ngx_http_lua_ffi_uri_escaped_length(const u_char *src, size_t len,
     int type)
@@ -463,6 +544,11 @@ ngx_http_lua_ffi_uri_escaped_length(const u_char *src, size_t len,
 }
 
 
+/**
+ * ngx.escape_uri
+ * 
+ * syntax: newstr = ngx.escape_uri(str)
+ */
 void
 ngx_http_lua_ffi_escape_uri(const u_char *src, size_t len, u_char *dst,
     int type)

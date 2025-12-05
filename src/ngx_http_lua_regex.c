@@ -43,13 +43,21 @@ static char                    ngx_pcre2_version[PCRE2_VERSION_SIZE];
 #define NGX_LUA_RE_MIN_JIT_STACK_SIZE 32 * 1024
 
 
+/**
+ * 表示一个正则表达式编译结果
+ */
 typedef struct {
     ngx_pool_t                   *pool;
     u_char                       *name_table;
+    //匹配到的命名组的数量
     int                           name_count;
     int                           name_entry_size;
 
+    //匹配组的数量
     int                           ncaptures;
+    //匹配组的起始位置数组
+    //        local from = captures[nth * 2] + 1
+    //    local to = captures[nth * 2 + 1]
     int                          *captures;
 
 #if (NGX_PCRE2)
@@ -146,6 +154,9 @@ ngx_http_lua_regex_free_study_data(ngx_pool_t *pool, ngx_http_lua_regex_t *re)
 }
 
 
+/**
+ * 编译正则表达式，直接调用pcre接口，没有使用ngx提供的方法
+ */
 #if (NGX_PCRE2)
 static ngx_int_t
 ngx_http_lua_regex_compile(ngx_http_lua_regex_compile_t *rc)
@@ -490,6 +501,9 @@ ngx_http_lua_regex_jit_compile(ngx_http_lua_regex_t *re, int flags,
 #endif
 
 
+/**
+ * 在ngx_http_lua_init()中添加在cf->pool上的清理函数
+ */
 #if (NGX_PCRE2)
 void
 ngx_http_lua_regex_cleanup(void *data)
@@ -527,6 +541,14 @@ ngx_http_lua_regex_cleanup(void *data)
 #endif
 
 
+/**
+ * 编译正则表达式
+ * pat: 正则
+ * pat_len: 正则表达式长度
+ * flags:编译选项
+ * pcre_opts：pcre选项
+ * errstr: 错误信息
+ */
 ngx_http_lua_regex_t *
 ngx_http_lua_ffi_compile_regex(const unsigned char *pat, size_t pat_len,
     int flags, int pcre_opts, u_char *errstr,
@@ -542,6 +564,7 @@ ngx_http_lua_ffi_compile_regex(const unsigned char *pat, size_t pat_len,
     ngx_http_lua_main_conf_t         *lmcf;
     ngx_http_lua_regex_compile_t      re_comp;
 
+    //创建一个临时内存池
     pool = ngx_create_pool(512, ngx_cycle->log);
     if (pool == NULL) {
         msg = "no memory";
@@ -550,6 +573,7 @@ ngx_http_lua_ffi_compile_regex(const unsigned char *pat, size_t pat_len,
 
     pool->log = (ngx_log_t *) &ngx_cycle->new_log;
 
+    //创建表示正则编译结果的结构体
     re = ngx_palloc(pool, sizeof(ngx_http_lua_regex_t));
     if (re == NULL) {
         ngx_destroy_pool(pool);
@@ -682,6 +706,14 @@ error:
 
 
 #if (NGX_PCRE2)
+/**
+ * 正则表达式匹配
+ * re: 编译出来的正则表达式
+ * flags：匹配选项
+ * s: 待匹配字符串
+ * len: 待匹配字符串长度
+ * pos: 匹配开始位置
+ */
 int
 ngx_http_lua_ffi_exec_regex(ngx_http_lua_regex_t *re, int flags,
     const u_char *s, size_t len, int pos)
@@ -834,6 +866,9 @@ ngx_http_lua_ffi_exec_regex(ngx_http_lua_regex_t *re, int flags,
 #endif
 
 
+/**
+ * 销毁正则表达式
+ */
 void
 ngx_http_lua_ffi_destroy_regex(ngx_http_lua_regex_t *re)
 {
@@ -954,6 +989,9 @@ ngx_http_lua_ffi_script_eval_data(ngx_http_lua_script_engine_t *e,
 }
 
 
+/**
+ * 返回 lua_regex_cache_max_entries 配置指令值
+ */
 uint32_t
 ngx_http_lua_ffi_max_regex_cache_size(void)
 {

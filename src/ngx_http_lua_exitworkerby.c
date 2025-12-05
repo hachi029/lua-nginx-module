@@ -18,6 +18,11 @@
 #endif
 
 
+/**
+ * exit process
+ * 
+ * exit_process回调方法在服务停止前调用。在 master/worker模式下， worker进程会在退出前调用它
+ */
 void
 ngx_http_lua_exit_worker(ngx_cycle_t *cycle)
 {
@@ -75,6 +80,8 @@ ngx_http_lua_exit_worker(ngx_cycle_t *cycle)
 
     ngx_http_lua_set_req(lmcf->lua, r);
 
+    // ngx_http_lua_exit_worker_by_inline or ngx_http_lua_exit_worker_by_file
+    //指向exit_worker_by_lua_*指令配置的lua代码
     (void) lmcf->exit_worker_handler(cycle->log, lmcf, lmcf->lua);
 
     ngx_destroy_pool(c->pool);
@@ -90,6 +97,13 @@ failed:
 }
 
 
+/**
+ * ngx_http_lua_exit_worker->.
+ * 
+ * exit_worker_by_lua_block配置指令的cmd->post
+ * 
+ * 执行 exit_worker_by_lua_block配置指令配置的Lua代码
+ */
 ngx_int_t
 ngx_http_lua_exit_worker_by_inline(ngx_log_t *log,
     ngx_http_lua_main_conf_t *lmcf, lua_State *L)
@@ -112,6 +126,13 @@ ngx_http_lua_exit_worker_by_inline(ngx_log_t *log,
 }
 
 
+/**
+ * ngx_http_lua_exit_worker->.
+ * 
+ * exit_worker_by_lua_file配置指令的cmd->post
+ * 
+ * 执行 exit_worker_by_lua_file 配置指令配置的Lua代码
+ */
 ngx_int_t
 ngx_http_lua_exit_worker_by_file(ngx_log_t *log, ngx_http_lua_main_conf_t *lmcf,
     lua_State *L)

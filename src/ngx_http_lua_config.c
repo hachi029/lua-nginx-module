@@ -18,6 +18,9 @@ static int ngx_http_lua_config_prefix(lua_State *L);
 static int ngx_http_lua_config_configure(lua_State *L);
 
 
+/**
+ * 注入ngx.config.*相关api
+ */
 void
 ngx_http_lua_inject_config_api(lua_State *L)
 {

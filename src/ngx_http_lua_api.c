@@ -16,6 +16,10 @@
 #include "ngx_http_lua_util.h"
 
 
+/**
+ * 在Lua中，每个协程对应有一个lua_State结构体， 这个结构体中保存了协程的所有信息。
+ * 所有的协程共享一个global_State结构体，这个结构体保存全局相关的一些信息，主要是所有需要垃圾回收的对象。
+ */
 lua_State *
 ngx_http_lua_get_global_state(ngx_conf_t *cf)
 {
@@ -83,6 +87,14 @@ ngx_http_lua_add_package_preload(ngx_conf_t *cf, const char *package,
 }
 
 
+/**
+ * 
+ * 遇到lua_shared_dict配置指令
+ * 添加一个共享内存到lmcf->shm_zones中
+ * 
+ * 共享内存最终是通过 ngx_cycle_t 的 shared_memory 数组维护的，这个函数则封装了 Nginx 原生的 ngx_shared_memory_add 接口
+ * 
+ */
 ngx_shm_zone_t *
 ngx_http_lua_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
     void *tag)
@@ -98,6 +110,7 @@ ngx_http_lua_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
         return NULL;
     }
 
+    //如果lmcf->shm_zones为NULL，则进行初始化
     if (lmcf->shm_zones == NULL) {
         lmcf->shm_zones = ngx_palloc(cf->pool, sizeof(ngx_array_t));
         if (lmcf->shm_zones == NULL) {
@@ -112,15 +125,20 @@ ngx_http_lua_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
         }
     }
 
+    //调用原生的接口添加一块共享内存，tag 则是 ngx_http_lua_module 模块结构的地址
+    //根据name到cycle->shared_memory中查找，如果未找到，则创建一个 ngx_shm_zone_t
     zone = ngx_shared_memory_add(cf, name, (size_t) size, tag);
     if (zone == NULL) {
         return NULL;
     }
 
+    //已经有同名的了，直接返回
     if (zone->data) {
         ctx = (ngx_http_lua_shm_zone_ctx_t *) zone->data;
         return &ctx->zone;
     }
+
+    //未找到同名的，初始化zone的相关属性
 
     n = sizeof(ngx_http_lua_shm_zone_ctx_t);
 
@@ -133,8 +151,11 @@ ngx_http_lua_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
     ctx->log = &cf->cycle->new_log;
     ctx->cycle = cf->cycle;
 
+    //复制 zone，两份 zone 分别设置不同的 data 和 init 字段。两个 zone 的关系是：zone2 = zone1->data->zone。
+    //拷贝到ctx->zone中
     ngx_memcpy(&ctx->zone, zone, sizeof(ngx_shm_zone_t));
 
+    //加入到lmcf->shm_zones中
     zp = ngx_array_push(lmcf->shm_zones);
     if (zp == NULL) {
         return NULL;
@@ -152,6 +173,11 @@ ngx_http_lua_shared_memory_add(ngx_conf_t *cf, ngx_str_t *name, size_t size,
 }
 
 
+/**
+ * lua_shared_dict配置指令解析时配置的shm_zone初始化的函数
+ * 
+ * 这个函数将在 ngx_init_cycle 里被调用. 
+ */
 static ngx_int_t
 ngx_http_lua_shared_memory_init(ngx_shm_zone_t *shm_zone, void *data)
 {
@@ -179,6 +205,7 @@ ngx_http_lua_shared_memory_init(ngx_shm_zone_t *shm_zone, void *data)
     zone->noreuse = shm_zone->noreuse;
 #endif
 
+    /* 这里的 init 方法实际上就是 ngx_http_lua_shdict_init_zone */
     if (zone->init(zone, odata) != NGX_OK) {
         return NGX_ERROR;
     }
@@ -194,12 +221,16 @@ ngx_http_lua_shared_memory_init(ngx_shm_zone_t *shm_zone, void *data)
 
     lmcf->shm_zones_inited++;
 
+    // 判断已经完成最后一个共享内存字典的初始化之后，执行 lmcf->init_handler
+    //以保证 init_by_lua* 传入的 Lua 代码能在所有共享内存字典初始化之后使用，从而可以使用 ngx.shared apis
     if (lmcf->shm_zones_inited == lmcf->shm_zones->nelts
         && lmcf->init_handler && !ngx_test_config)
     {
         saved_cycle = ngx_cycle;
         ngx_cycle = ctx->cycle;
 
+        //执行init_by_lua_*阶段的lua代码
+        //ngx_http_lua_init_by_inline or ngx_http_lua_init_by_file  
         rc = lmcf->init_handler(ctx->log, lmcf, lmcf->lua);
 
         ngx_cycle = saved_cycle;

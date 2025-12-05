@@ -27,6 +27,11 @@ static ngx_int_t ngx_http_lua_capture_body_filter(ngx_http_request_t *r,
     ngx_chain_t *in);
 
 
+/**
+ * ngx_http_lua_init->.
+ * 
+ * 安装一个header filter和一个body filter
+ */
 ngx_int_t
 ngx_http_lua_capture_filter_init(ngx_conf_t *cf)
 {
@@ -41,6 +46,11 @@ ngx_http_lua_capture_filter_init(ngx_conf_t *cf)
 }
 
 
+/**
+ * ngx_http_top_header_filter = ngx_http_lua_capture_header_filter;
+ * 
+ * header_filter
+ */
 static ngx_int_t
 ngx_http_lua_capture_header_filter(ngx_http_request_t *r)
 {
@@ -110,6 +120,11 @@ ngx_http_lua_capture_header_filter(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx_http_top_body_filter = ngx_http_lua_capture_body_filter;
+ * 
+ * body_filter
+ */
 static ngx_int_t
 ngx_http_lua_capture_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {

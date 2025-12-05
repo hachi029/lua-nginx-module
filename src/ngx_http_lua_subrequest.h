@@ -34,6 +34,10 @@ extern ngx_str_t  ngx_http_lua_patch_method;
 extern ngx_str_t  ngx_http_lua_trace_method;
 
 
+/**
+ * 实现子请求的上下文结构
+ * ngx.location.capture()
+ */
 typedef struct ngx_http_lua_post_subrequest_data_s {
     ngx_http_lua_ctx_t          *ctx;
     ngx_http_lua_co_ctx_t       *pr_co_ctx;

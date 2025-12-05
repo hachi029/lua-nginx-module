@@ -39,12 +39,18 @@ typedef void (*ngx_http_lua_socket_tcp_upstream_handler_pt)
     (ngx_http_request_t *r, ngx_http_lua_socket_tcp_upstream_t *u);
 
 
+/** 
+ * ngx.socket.tcp 建立连接时的结构体
+ * */ 
 typedef struct {
+    //关联事件
     ngx_event_t                         event;
     ngx_queue_t                         queue;
+    //连接host
     ngx_str_t                           host;
     ngx_http_cleanup_pt                *cleanup;
     ngx_http_lua_socket_tcp_upstream_t *u;
+    //连接端口
     in_port_t                           port;
 } ngx_http_lua_socket_tcp_conn_op_ctx_t;
 
@@ -54,29 +60,45 @@ typedef struct {
     ngx_free(conn_op_ctx)
 
 
+ /**
+  * 表示ngx.socket.tcp场景的一个连接池
+  */
 typedef struct {
     lua_State                         *lua_vm;
 
     ngx_int_t                          size;
+    //用于复用 ngx_http_lua_socket_tcp_conn_op_ctx_t结构体
     ngx_queue_t                        cache_connect_op;
+    //等待从连接池获取连接的队列， 用于限制对某个host:port的连接数量， 元素类型为 ngx_http_lua_socket_tcp_conn_op_ctx_t
     ngx_queue_t                        wait_connect_op;
 
     /* connections == active connections + pending connect operations,
      * while active connections == out-of-pool reused connections
      *                             + in-pool connections */
+    //排队等待获取连接和正在使用的连接数量之和
+    //if (spool->connections > spool->size + spool->backlog)
     ngx_int_t                          connections;
 
+    //每个元素是一个可用的已建立的连接
     /* queues of ngx_http_lua_socket_pool_item_t: */
     ngx_queue_t                        cache;
+    //未使用的ngx_http_lua_socket_pool_item_t组成的队列
     ngx_queue_t                        free;
 
     ngx_int_t                          backlog;
 
+    //    size = sizeof(ngx_http_lua_socket_pool_t) - 1 + key_len
+    //       + sizeof(ngx_http_lua_socket_pool_item_t) * pool_size;
+    //之后是一块连续的内存，先是key，长度为key_len, 之后是pool_size个ngx_http_lua_socket_pool_item_t的数组
     u_char                             key[1];
 
 } ngx_http_lua_socket_pool_t;
 
 
+/**
+ * ngx.socket.tcp()
+ * 存储socket信息的上下文结构.这个结构是可重用的，reused保存了重用的次数
+ */
 struct ngx_http_lua_socket_tcp_upstream_s {
     ngx_http_lua_socket_tcp_retval_handler          read_prepare_retvals;
     ngx_http_lua_socket_tcp_retval_handler          write_prepare_retvals;
@@ -85,9 +107,11 @@ struct ngx_http_lua_socket_tcp_upstream_s {
 
     ngx_http_lua_socket_udata_queue_t              *udata_queue;
 
+    //连接池
     ngx_http_lua_socket_pool_t      *socket_pool;
 
     ngx_http_lua_loc_conf_t         *conf;
+    //注册到r->cleanup的回调函数
     ngx_http_cleanup_pt             *cleanup;
     ngx_http_request_t              *request;
     ngx_peer_connection_t            peer;
@@ -96,6 +120,7 @@ struct ngx_http_lua_socket_tcp_upstream_s {
     ngx_msec_t                       send_timeout;
     ngx_msec_t                       connect_timeout;
 
+    //与upstream.resolved类似，表示用于连接的远端的地址
     ngx_http_upstream_resolved_t    *resolved;
 
     ngx_chain_t                     *bufs_in; /* input data buffers */
@@ -116,6 +141,7 @@ struct ngx_http_lua_socket_tcp_upstream_s {
     ngx_http_lua_co_ctx_t           *read_co_ctx;
     ngx_http_lua_co_ctx_t           *write_co_ctx;
 
+    //记录连接的复用次数
     ngx_uint_t                       reused;
 
 #if (NGX_HTTP_SSL)
@@ -129,8 +155,11 @@ struct ngx_http_lua_socket_tcp_upstream_s {
 
     unsigned                         ft_type:16;
     unsigned                         no_close:1;
+    //标识在等待连接建立
     unsigned                         conn_waiting:1;
+    //标识正在读取发送数据
     unsigned                         read_waiting:1;
+    //标识正在等待发送数据
     unsigned                         write_waiting:1;
     unsigned                         eof:1;
     unsigned                         body_downstream:1;
@@ -166,7 +195,11 @@ typedef struct {
 } ngx_http_lua_socket_compiled_pattern_t;
 
 
+/**
+ * ngx.socket.tcp连接池中的一个元素，表示一条缓存的已经打开的连接
+ */
 typedef struct {
+    //指向当前连接所属的连接池
     ngx_http_lua_socket_pool_t      *socket_pool;
 
     ngx_queue_t                      queue;
@@ -175,6 +208,7 @@ typedef struct {
     socklen_t                        socklen;
     struct sockaddr_storage          sockaddr;
 
+    //当前连接的复用次数
     ngx_uint_t                       reused;
 
     ngx_http_lua_socket_udata_queue_t   *udata_queue;

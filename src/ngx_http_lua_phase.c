@@ -13,6 +13,11 @@
 #include "ngx_http_lua_common.h"
 
 
+/**
+ * ngx.get_raw_phase(r)
+ * 
+ *  return ctx->context
+ */
 int
 ngx_http_lua_ffi_get_phase(ngx_http_request_t *r, char **err)
 {

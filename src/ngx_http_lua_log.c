@@ -31,6 +31,9 @@ static void ngx_http_lua_inject_log_consts(lua_State *L);
  * @param L Lua state pointer
  * @retval always 0 (don't return values to Lua)
  * */
+/**
+ * syntax: ngx.log(log_level, ...)
+ */
 int
 ngx_http_lua_ngx_log(lua_State *L)
 {
@@ -48,6 +51,7 @@ ngx_http_lua_ngx_log(lua_State *L)
         log = ngx_cycle->log;
     }
 
+    //日志级别
     level = luaL_checkint(L, 1);
     if (level < NGX_LOG_STDERR || level > NGX_LOG_DEBUG) {
         msg = lua_pushfstring(L, "bad log level: %d", level);
@@ -61,6 +65,13 @@ ngx_http_lua_ngx_log(lua_State *L)
 }
 
 
+/**
+ * https://openresty-reference.readthedocs.io/en/latest/Lua_Nginx_API/#print
+ * 
+ * 覆盖了lua的print函数
+ * 
+ * print 相当于级别为 ngx.NOTICE 的 ngx.log 调用
+ */
 /**
  * Override Lua print function, output message to nginx error logs. Equal to
  * ngx.log(ngx.NOTICE, ...).
@@ -87,6 +98,10 @@ ngx_http_lua_print(lua_State *L)
 }
 
 
+/**
+ * ident: log message prefix, usually "[lua] "
+ * level: log level, one of NGX_LOG_*
+ */
 static int
 log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
     lua_State *L)
@@ -101,6 +116,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
     const char          *msg;
     lua_Debug            ar;
 
+    //检查日志级别, DEBUG值最大
     if (level > log->log_level) {
         return 0;
     }
@@ -109,9 +125,11 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
     /* add debug info */
 
     lua_getstack(L, 1, &ar);
+    //获取当前文件路径、当前方法、当前行
     lua_getinfo(L, "Snl", &ar);
 
     /* get the basename of the Lua source file path, stored in q */
+    //当前文件路径
     name.data = (u_char *) ar.short_src;
     if (name.data == NULL) {
         name.len = 0;
@@ -131,8 +149,11 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
 
 #endif
 
+    //参数个数
     nargs = lua_gettop(L);
 
+    //2025/07/03 21:19:24 [info] 14346#9957737: *2 [lua] init_worker1.lua:8: log(): xxhealthy 123123, context: ngx.timer
+    //size 计算日志长度： 文件名+:+行号+: 
     size = name.len + NGX_INT_T_LEN + sizeof(":: ") - 1;
 
     if (*ar.namewhat != '\0' && *ar.what == 'L') {
@@ -167,6 +188,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
                 break;
 
             case LUA_TTABLE:
+                //如果是 table，尝试调用其元表的 __tostring 函数，假如调用失败，则会抛出异常
                 if (!luaL_callmeta(L, i, "__tostring")) {
                     return luaL_argerror(L, i, "expected table to have "
                                          "__tostring metamethod");
@@ -177,6 +199,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
                 break;
 
             case LUA_TLIGHTUSERDATA:
+                //如果是 userdata，则尝试获取其起始地址，获取不到则得到字符串 "null"
                 if (lua_touserdata(L, i) == NULL) {
                     size += sizeof("null") - 1;
                     break;
@@ -194,15 +217,20 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
 
     buf = lua_newuserdata(L, size);
 
+    //复制lua文件名 init_worker1.lua
     p = ngx_copy(buf, name.data, name.len);
 
+    //init_worker1.lua:
     *p++ = ':';
 
+    //复制当前行号 init_worker1.lua:8
     p = ngx_snprintf(p, NGX_INT_T_LEN, "%d",
                      ar.currentline > 0 ? ar.currentline : ar.linedefined);
 
+    //分隔符init_worker1.lua:8: 
     *p++ = ':'; *p++ = ' ';
 
+    //方法名init_worker1.lua:8: log(): 
     if (*ar.namewhat != '\0' && *ar.what == 'L') {
         p = ngx_copy(p, ar.name, src_len);
         *p++ = '(';
@@ -211,6 +239,7 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
         *p++ = ' ';
     }
 
+    //复制参数
     for (i = 1; i <= nargs; i++) {
         type = lua_type(L, i);
         switch (type) {
@@ -270,25 +299,37 @@ log_wrapper(ngx_log_t *log, const char *ident, ngx_uint_t level,
                           (int) size);
     }
 
+    //输出日志
     ngx_log_error(level, log, 0, "%s%*s", ident, (size_t) (p - buf), buf);
 
     return 0;
 }
 
 
+/**
+ * 注入日志API到Lua全局环境中
+ * ngx.log和全局的print函数
+ *
+ */
 void
 ngx_http_lua_inject_log_api(lua_State *L)
 {
+    //注入日志级别常量到Lua全局环境中
     ngx_http_lua_inject_log_consts(L);
 
+    //ngx.log
     lua_pushcfunction(L, ngx_http_lua_ngx_log);
     lua_setfield(L, -2, "log");
 
+    //全局的print函数
     lua_pushcfunction(L, ngx_http_lua_print);
     lua_setglobal(L, "print");
 }
 
 
+/**
+ * 注入日志级别常量到Lua全局环境中
+ */
 static void
 ngx_http_lua_inject_log_consts(lua_State *L)
 {
@@ -324,6 +365,10 @@ ngx_http_lua_inject_log_consts(lua_State *L)
 
 
 #ifdef HAVE_INTERCEPT_ERROR_LOG_PATCH
+/**
+ * cycle->intercept_error_log_handler
+ * 用于error_log捕获
+ */
 ngx_int_t
 ngx_http_lua_capture_log_handler(ngx_log_t *log,
     ngx_uint_t level, u_char *buf, size_t n)
@@ -335,6 +380,7 @@ ngx_http_lua_capture_log_handler(ngx_log_t *log,
     ringbuf = (ngx_http_lua_log_ringbuf_t  *)
                     ngx_cycle->intercept_error_log_data;
 
+    //如果当前级别高于要捕获的级别(debug级别最高)
     if (level > ringbuf->filter_level) {
         return NGX_OK;
     }
@@ -348,6 +394,9 @@ ngx_http_lua_capture_log_handler(ngx_log_t *log,
 #endif
 
 
+/**
+ * syntax: status, err = log_module.set_filter_level(log_level)
+ */
 int
 ngx_http_lua_ffi_errlog_set_filter_level(int level, u_char *err, size_t *errlen)
 {
@@ -369,6 +418,7 @@ ngx_http_lua_ffi_errlog_set_filter_level(int level, u_char *err, size_t *errlen)
         return NGX_ERROR;
     }
 
+    //设置filter_level
     ringbuf->filter_level = level;
     return NGX_OK;
 #else
@@ -380,6 +430,13 @@ ngx_http_lua_ffi_errlog_set_filter_level(int level, u_char *err, size_t *errlen)
 }
 
 
+/**
+ * log_module.get_logs(max?, res?)
+ * 
+ * 读取一条日志
+ * 
+ * 返回日志长度
+ */
 int
 ngx_http_lua_ffi_errlog_get_msg(char **log, int *loglevel, u_char *err,
     size_t *errlen, double *log_time)
@@ -414,6 +471,10 @@ ngx_http_lua_ffi_errlog_get_msg(char **log, int *loglevel, u_char *err,
 }
 
 
+/**
+ * 返回 error_log 配置指令配置的日志级别
+ * syntax: log_level = log_module.get_sys_filter_level()
+ */
 int
 ngx_http_lua_ffi_errlog_get_sys_filter_level(ngx_http_request_t *r)
 {
@@ -436,6 +497,9 @@ ngx_http_lua_ffi_errlog_get_sys_filter_level(ngx_http_request_t *r)
 }
 
 
+/**
+ * syntax: log_module.raw_log(log_level, msg)
+ */
 int
 ngx_http_lua_ffi_raw_log(ngx_http_request_t *r, int level, u_char *s,
     size_t s_len)

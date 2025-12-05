@@ -19,11 +19,16 @@
 #define NGX_HTTP_LUA_TIMER_ERRBUF_SIZE  128
 
 
+/**
+ * ngx.timer.at/every
+ * 表示一个timer的执行上下文
+ */
 typedef struct {
     void        **main_conf;
     void        **srv_conf;
     void        **loc_conf;
 
+    //每个协程一个
     lua_State    *co;
 
     ngx_pool_t   *pool;
@@ -35,7 +40,9 @@ typedef struct {
     ngx_http_lua_vm_state_t           *vm_state;
 
     int           co_ref;
+    // tctx->delay = every ? delay : 0;
     unsigned      delay:31;
+    //是否提前触发
     unsigned      premature:1;
 } ngx_http_lua_timer_ctx_t;
 
@@ -52,6 +59,9 @@ static u_char *ngx_http_lua_log_timer_error(ngx_log_t *log, u_char *buf,
 static void ngx_http_lua_abort_pending_timers(ngx_event_t *ev);
 
 
+/**
+ * 注入ngx.timer.*相关api
+ */
 void
 ngx_http_lua_inject_timer_api(lua_State *L)
 {
@@ -73,6 +83,9 @@ ngx_http_lua_inject_timer_api(lua_State *L)
 }
 
 
+/**
+ * syntax: count = ngx.timer.running_count()
+ */
 static int
 ngx_http_lua_ngx_timer_running_count(lua_State *L)
 {
@@ -92,6 +105,9 @@ ngx_http_lua_ngx_timer_running_count(lua_State *L)
 }
 
 
+/**
+ * syntax: count = ngx.timer.pending_count()
+ */
 static int
 ngx_http_lua_ngx_timer_pending_count(lua_State *L)
 {
@@ -111,6 +127,10 @@ ngx_http_lua_ngx_timer_pending_count(lua_State *L)
 }
 
 
+/**
+ * syntax: hdl, err = ngx.timer.at(delay, callback, user_arg1, user_arg2, ...)
+ * 
+ */
 static int
 ngx_http_lua_ngx_timer_at(lua_State *L)
 {
@@ -122,6 +142,10 @@ ngx_http_lua_ngx_timer_at(lua_State *L)
  * TODO: return a timer handler instead which can be passed to
  * the ngx.timer.cancel method to cancel the timer.
  */
+/**
+ * syntax: hdl, err = ngx.timer.every(delay, callback, user_arg1, user_arg2, ...)
+ * 
+ */
 static int
 ngx_http_lua_ngx_timer_every(lua_State *L)
 {
@@ -129,6 +153,11 @@ ngx_http_lua_ngx_timer_every(lua_State *L)
 }
 
 
+/**
+ * hdl, err = ngx.timer.at(delay, callback, user_arg1, user_arg2, ...)
+ * syntax: hdl, err = ngx.timer.every(delay, callback, user_arg1, user_arg2, ...)
+ * 
+ */
 static int
 ngx_http_lua_ngx_timer_helper(lua_State *L, int every)
 {
@@ -160,10 +189,12 @@ ngx_http_lua_ngx_timer_helper(lua_State *L, int every)
 
     delay = (ngx_msec_t) (luaL_checknumber(L, 1) * 1000);
 
+    //对于every， delay不能为0
     if (every && delay == 0) {
         return luaL_error(L, "delay cannot be zero");
     }
 
+    //callback
     luaL_argcheck(L, lua_isfunction(L, 2) && !lua_iscfunction(L, 2), 2,
                   "Lua function expected");
 
@@ -184,6 +215,7 @@ ngx_http_lua_ngx_timer_helper(lua_State *L, int every)
      */
     ngx_http_lua_check_context(L, ctx, ~NGX_HTTP_LUA_CONTEXT_EXIT_WORKER);
 
+    //当ngx准备退出时，不允许再创建delay>0的timer
     if (ngx_exiting && delay > 0) {
         lua_pushnil(L);
         lua_pushliteral(L, "process exiting");
@@ -192,24 +224,29 @@ ngx_http_lua_ngx_timer_helper(lua_State *L, int every)
 
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
 
+    //如果当前pending状态的timer已经大于配置的限制值
     if (lmcf->pending_timers >= lmcf->max_pending_timers) {
         lua_pushnil(L);
         lua_pushliteral(L, "too many pending timers");
         return 2;
     }
 
+    //watcher用来管理所有的timers。为NULL，表示还没有初始化
     if (lmcf->watcher == NULL) {
         /* create the watcher fake connection */
 
         ngx_log_debug0(NGX_LOG_DEBUG_HTTP, ngx_cycle->log, 0,
                        "lua creating fake watcher connection");
 
+        //先保存ngx_cycle->files[0]，避免下边ngx_get_connection中ngx_cycle->files[0]被覆盖
         if (ngx_cycle->files) {
             saved_c = ngx_cycle->files[0];
         }
 
+        //获取一条连接
         lmcf->watcher = ngx_get_connection(0, ngx_cycle->log);
 
+        //恢复ngx_cycle->files[0]
         if (ngx_cycle->files) {
             ngx_cycle->files[0] = saved_c;
         }
@@ -336,6 +373,7 @@ ngx_http_lua_ngx_timer_helper(lua_State *L, int every)
     ev->data = tctx;
     ev->log = ngx_cycle->log;
 
+    //增加pending_timers数量
     lmcf->pending_timers++;
 
 #ifdef HAVE_POSTED_DELAYED_EVENTS_PATCH
@@ -373,6 +411,9 @@ nomem:
 }
 
 
+/**
+ * 拷贝重新设置一个timer
+ */
 static ngx_int_t
 ngx_http_lua_timer_copy(ngx_http_lua_timer_ctx_t *old_tctx)
 {
@@ -510,6 +551,9 @@ nomem:
 }
 
 
+/**
+ * ngx.timer.at函数到期时执行的handler
+ */
 static void
 ngx_http_lua_timer_handler(ngx_event_t *ev)
 {
@@ -542,9 +586,12 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
 
     lmcf = tctx.lmcf;
 
+    //pending_timers-1
     lmcf->pending_timers--;
 
+    //ngx.timer.every
     if (!ngx_exiting && tctx.delay > 0) {
+        //拷贝重新设置一个timer
         rc = ngx_http_lua_timer_copy(&tctx);
         if (rc != NGX_OK) {
             ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,
@@ -553,6 +600,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
         }
     }
 
+    //正在运行中的timer超过限制
     if (lmcf->running_timers >= lmcf->max_running_timers) {
         p = ngx_snprintf(errbuf, NGX_HTTP_LUA_TIMER_ERRBUF_SIZE - 1,
                          "%i lua_max_running_timers are not enough",
@@ -562,6 +610,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
         goto failed;
     }
 
+    //获取一条连接
     c = ngx_http_lua_create_fake_connection(tctx.pool);
     if (c == NULL) {
         errmsg = "could not create fake connection";
@@ -576,6 +625,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
     c->listening = tctx.listening;
     c->addr_text = tctx.client_addr_text;
 
+    //创建一个ngx_http_request_t结构体
     r = ngx_http_lua_create_fake_request(c);
     if (r == NULL) {
         errmsg = "could not create fake request";
@@ -597,6 +647,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
 
     dd("lmcf: %p", lmcf);
 
+    //创建ngx_http_lua_module的上下文结构体
     ctx = ngx_http_lua_create_ctx(r);
     if (ctx == NULL) {
         errmsg = "could not create ctx";
@@ -620,6 +671,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
 
     L = ngx_http_lua_get_lua_vm(r, ctx);
 
+    //r->pool上注册一个清理函数
     cln = ngx_pool_cleanup_add(r->pool, 0);
     if (cln == NULL) {
         errmsg = "could not add request cleanup";
@@ -646,6 +698,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
 
     ngx_http_lua_attach_co_ctx_to_L(tctx.co, ctx->cur_co_ctx);
 
+    //正在运行中的timers+1
     lmcf->running_timers++;
 
     lua_pushboolean(tctx.co, tctx.premature);
@@ -659,6 +712,7 @@ ngx_http_lua_timer_handler(ngx_event_t *ev)
     ctx->cur_co_ctx->co_top = 1;
 #endif
 
+    //调用lua_resume, 执行timer的callback
     rc = ngx_http_lua_run_thread(L, r, ctx, n - 1);
 
     dd("timer lua run thread: %d", (int) rc);
@@ -764,6 +818,12 @@ ngx_http_lua_log_timer_error(ngx_log_t *log, u_char *buf, size_t len)
 }
 
 
+
+/**
+ * lmcf->watcher->read->handler = ngx_http_lua_abort_pending_timers;
+ * 
+ * 触发所有通过ngx.timer.at/every创建的timer超时
+ */
 static void
 ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
 {
@@ -797,6 +857,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
         saved_c = ngx_cycle->files[0];
     }
 
+    //释放连接
     ngx_free_connection(c);
 
     c->fd = (ngx_socket_t) -1;
@@ -805,6 +866,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
         ngx_cycle->files[0] = saved_c;
     }
 
+    //没有pending中的timer，直接返回
     if (lmcf->pending_timers == 0) {
         return;
     }
@@ -822,6 +884,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
 
     prev = NULL;
 
+    //pending_timers个ngx_event_t指针数组
     events = ngx_pcalloc(ngx_cycle->pool,
                          lmcf->pending_timers * sizeof(ngx_event_t *));
     if (events == NULL) {
@@ -832,6 +895,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
 
     dd("root: %p, root parent: %p, sentinel: %p", cur, cur->parent, sentinel);
 
+    //深度优先遍历ngx_event_timer_rbtree。将所有由ngx.timer.*设置的timer的ngx_event_t收集到events数组中
     while (n < lmcf->pending_timers) {
         if  (cur == sentinel || cur == NULL) {
             ngx_log_error(NGX_LOG_ALERT, ngx_cycle->log, 0,
@@ -851,6 +915,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
                 ev = (ngx_event_t *)
                     ((char *) cur - offsetof(ngx_event_t, timer));
 
+                //说明是由ngx.timer.*相关api设置的timer
                 if (ev->handler == ngx_http_lua_timer_handler) {
                     dd("found node: %p", cur);
                     events[n++] = ev;
@@ -865,6 +930,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
             ev = (ngx_event_t *)
                 ((char *) cur - offsetof(ngx_event_t, timer));
 
+            //说明是由ngx.timer.*相关api设置的timer
             if (ev->handler == ngx_http_lua_timer_handler) {
                 dd("found node 2: %p", cur);
                 events[n++] = ev;
@@ -892,6 +958,7 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
                    "lua found %i pending timers to be aborted prematurely",
                    n);
 
+    //遍历events数组，将其从ngx_rbtree_delete中删除，避免被重复触发
     for (i = 0; i < n; i++) {
         ev = events[i];
 
@@ -903,14 +970,18 @@ ngx_http_lua_abort_pending_timers(ngx_event_t *ev)
         ev->timer.parent = NULL;
 #endif
 
+        //timer_set置为0
         ev->timer_set = 0;
 
+        //设置已超时
         ev->timedout = 1;
 
         tctx = ev->data;
+        //设置premature标志
         tctx->premature = 1;
 
         dd("calling timer handler prematurely");
+        //执行回调
         ev->handler(ev);
     }
 

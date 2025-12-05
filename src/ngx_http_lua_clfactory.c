@@ -323,10 +323,14 @@ typedef struct {
 
 typedef struct {
 #ifndef OPENRESTY_LUAJIT
+    //标记 lua_load 是否调用过 Reader 来获取新的 chunk 片
     int         sent_begin;
+    //标记 Lua chunk 已经读取完毕
     int         sent_end;
 #endif
+    //指向的是要加载的整个 Lua chunk 串的首地址
     const char *s;
+    //这个 Lua chunk 串的大小
     size_t      size;
 } ngx_http_lua_clfactory_buffer_ctx_t;
 
@@ -611,6 +615,9 @@ error:
 #endif /* OPENRESTY_LUAJIT */
 
 
+/**
+ * 用自定义的函数从文件中加载代码
+ */
 ngx_int_t
 ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 {
@@ -637,6 +644,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 
     lua_pushfstring(L, "@%s", filename);
 
+    //打开文件
     lf.f = fopen(filename, "r");
     if (lf.f == NULL) {
         return ngx_http_lua_clfactory_errfile(L, "open", fname_index);
@@ -644,6 +652,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 
     c = getc(lf.f);
 
+    //如果首行以#开头，则跳过首行的
     if (c == '#') {  /* Unix exec. file? */
         lf.extraline = 1;
 
@@ -658,6 +667,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
         sharp = 1;
     }
 
+    //若是luac编译过的lua二进制文件，其前4个字节内容为LUA_SIGNATURE[0]的内容
     if (c == LUA_SIGNATURE[0] && filename) {  /* binary file? */
         lf.f = freopen(filename, "rb", lf.f);  /* reopen in binary mode */
 
@@ -722,6 +732,7 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 #else
     ungetc(c, lf.f);
 #endif
+    //lua_load()之后，closure便位于堆栈的顶层
     status = lua_load(L, ngx_http_lua_clfactory_getF, &lf,
                       lua_tostring(L, -1));
 
@@ -742,6 +753,11 @@ ngx_http_lua_clfactory_loadfile(lua_State *L, const char *filename)
 }
 
 
+/**
+ * 当 Cache Miss 的情况下，这个函数会在 ngx_http_lua_cache_loadbuffer 里调用
+ * 
+ * 这个函数最终是调用了 lua_load，把 Reader 设置为函数 ngx_http_lua_clfactory_getS，参数是一个 ngx_http_lua_clfactory_buffer_ctx_t  的变量，name 则是最终得到的 Lua chunk 的名字
+ */
 ngx_int_t
 ngx_http_lua_clfactory_loadbuffer(lua_State *L, const char *buff,
     size_t size, const char *name)
@@ -755,6 +771,7 @@ ngx_http_lua_clfactory_loadbuffer(lua_State *L, const char *buff,
     ls.sent_end = 0;
 #endif
 
+    // 把 ngx_http_lua_clfactory_getS 作为 reader，把 ls 作为 reader 的参数使用
     return lua_load(L, ngx_http_lua_clfactory_getS, &ls, name);
 }
 
@@ -863,12 +880,23 @@ ngx_http_lua_clfactory_errfile(lua_State *L, const char *what, int fname_index)
 }
 
 
+/**
+ * 
+ * 把代码添加 return function() 和 end 作为结尾，形成一个代码块，这个代码块能够返回一个函数体
+ * 
+ * 当 lua_load 首次调用这个 Reader 的时候，得到的将是字符串 "return function()"；当正式的 Lua chunk 读完以后，将会得到字符串 "\nend"。这样，
+ * 
+ * 实际上加载的 chunk 是一个返回函数的 Lua 语句
+ * 
+ * 这么做是有原因的，毕竟 lua_pcall 运行的只能是函数而用户所写的 Lua 代码则是不可控的
+ */
 static const char *
 ngx_http_lua_clfactory_getS(lua_State *L, void *ud, size_t *size)
 {
     ngx_http_lua_clfactory_buffer_ctx_t      *ls = ud;
 
 #ifndef OPENRESTY_LUAJIT
+     // 其实就相当于状态机使用 状态 1
     if (ls->sent_begin == 0) {
         ls->sent_begin = 1;
         *size = CLFACTORY_BEGIN_SIZE;
@@ -878,6 +906,7 @@ ngx_http_lua_clfactory_getS(lua_State *L, void *ud, size_t *size)
 #endif
 
     if (ls->size == 0) {
+        // 状态 2
 #ifndef OPENRESTY_LUAJIT
         if (ls->sent_end == 0) {
             ls->sent_end = 1;
@@ -889,6 +918,7 @@ ngx_http_lua_clfactory_getS(lua_State *L, void *ud, size_t *size)
         return NULL;
     }
 
+    // 状态 3
     *size = ls->size;
     ls->size = 0;
 

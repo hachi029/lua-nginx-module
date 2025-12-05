@@ -27,6 +27,16 @@ jmp_buf ngx_http_lua_exception;
  * @note nginx request pointer should be stored in Lua thread's globals table
  * in order to make logging working.
  * */
+/**
+ * 会把异常信息写入到错误日志中，级别是 error，然后恢复抛异常的协程运行前的运行环境，这是通过 setjmp 和 longjmp 来实现的。
+ * 
+ * 此函数作为新的错误处理函数，会覆盖默认的 Lua panic 程序, 它的作用是：
+ * 
+ * 输出 Lua VM 奔溃原因到 Nginx 错误日志中
+ * 跳到 setjmp 处恢复执行
+ *   疑问：所以 ngx_quit 生效了么？最终是恢复执行还是退出了呢？
+ * 
+ */
 int
 ngx_http_lua_atpanic(lua_State *L)
 {

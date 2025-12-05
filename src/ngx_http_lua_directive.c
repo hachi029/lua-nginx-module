@@ -76,6 +76,16 @@ enum {
 };
 
 
+/**
+ * lua_shared_dict 配置指令解析
+ * 
+ * syntax: lua_shared_dict <name> <size>
+ * 
+ * context: http
+ * 
+ * lua_shared_dict 指令可以添加一块共享内存字典
+ * 
+ */
 char *
 ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -87,6 +97,7 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_http_lua_shdict_ctx_t  *ctx;
     ssize_t                     size;
 
+    //初始化 lmcf->shdict_zones 动态数组。 /* 每一块共享内存字典都被串联在这个 shdict_zones 数组里 */
     if (lmcf->shdict_zones == NULL) {
         lmcf->shdict_zones = ngx_palloc(cf->pool, sizeof(ngx_array_t));
         if (lmcf->shdict_zones == NULL) {
@@ -105,6 +116,7 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     ctx = NULL;
 
+    //name
     if (value[1].len == 0) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid lua shared dict name \"%V\"", &value[1]);
@@ -113,14 +125,17 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     name = value[1];
 
+    //size
     size = ngx_parse_size(&value[2]);
 
+    //大小应该大于8k
     if (size <= 8191) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
                            "invalid lua shared dict size \"%V\"", &value[2]);
         return NGX_CONF_ERROR;
     }
 
+    /* 创建上下文结构体 */
     ctx = ngx_pcalloc(cf->pool, sizeof(ngx_http_lua_shdict_ctx_t));
     if (ctx == NULL) {
         return NGX_CONF_ERROR;
@@ -130,12 +145,14 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ctx->main_conf = lmcf;
     ctx->log = &cf->cycle->new_log;
 
+    //创建一个ngx_shm_zone_t, 并添加到lmcf->shm_zones中
     zone = ngx_http_lua_shared_memory_add(cf, &name, (size_t) size,
                                           &ngx_http_lua_module);
     if (zone == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    //相同名称的zone已经初始化过了
     if (zone->data) {
         ctx = zone->data;
 
@@ -145,9 +162,12 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //ngx_init_cycle 的最后会对 cycle->shared_memory 数组做遍历，并对其各个元素执行 shm_zone[i].init 回调函数
+    //设置好初始化函数和参数
     zone->init = ngx_http_lua_shdict_init_zone;
     zone->data = ctx;
 
+    //加入到lmcf->shdict_zones动态数组
     zp = ngx_array_push(lmcf->shdict_zones);
     if (zp == NULL) {
         return NGX_CONF_ERROR;
@@ -161,6 +181,10 @@ ngx_http_lua_shared_dict(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_code_cache 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_code_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -168,6 +192,7 @@ ngx_http_lua_code_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     ngx_flag_t       *fp;
     char             *ret;
 
+    //设置flag 
     ret = ngx_conf_set_flag_slot(cf, cmd, conf);
     if (ret != NGX_CONF_OK) {
         return ret;
@@ -185,6 +210,9 @@ ngx_http_lua_code_cache(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_load_resty_core 配置指令解析
+ */
 char *
 ngx_http_lua_load_resty_core(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -196,6 +224,9 @@ ngx_http_lua_load_resty_core(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_package_cpath 配置指令解析
+ */
 char *
 ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -210,6 +241,7 @@ ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //设置到lmcf->lua_cpath中
     lmcf->lua_cpath.len = value[1].len;
     lmcf->lua_cpath.data = value[1].data;
 
@@ -217,6 +249,10 @@ ngx_http_lua_package_cpath(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_package_path 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -231,6 +267,7 @@ ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     value = cf->args->elts;
 
+    //设置到lmcf->lua_path中
     lmcf->lua_path.len = value[1].len;
     lmcf->lua_path.data = value[1].data;
 
@@ -238,6 +275,9 @@ ngx_http_lua_package_path(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * lua_regex_cache_max_entries 配置指令解析
+ */
 char *
 ngx_http_lua_regex_cache_max_entries(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -250,6 +290,9 @@ ngx_http_lua_regex_cache_max_entries(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * lua_regex_match_limit 配置指令解析
+ */
 char *
 ngx_http_lua_regex_match_limit(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -262,6 +305,9 @@ ngx_http_lua_regex_match_limit(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * set_by_lua_block 配置指令解析
+ */
 #if defined(NDK) && NDK
 char *
 ngx_http_lua_set_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
@@ -282,6 +328,12 @@ ngx_http_lua_set_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * set_by_lua 配置指令解析
+ * 
+ * syntax: set_by_lua $res <lua-script-str> [$arg1 $arg2 ...]
+ * 
+ */
 char *
 ngx_http_lua_set_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -304,6 +356,7 @@ ngx_http_lua_set_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     target = value[1];
 
     filter.type = NDK_SET_VAR_MULTI_VALUE_DATA;
+    // 把 Lua 处理函数设置 filter 结构体中
     filter.func = cmd->post;
     filter.size = cf->args->nelts - 3;    /*  get number of real params */
 
@@ -312,6 +365,7 @@ ngx_http_lua_set_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //计算cache_key
     cache_key = ngx_http_lua_gen_chunk_cache_key(cf, "set_by_lua",
                                                  value[2].data,
                                                  value[2].len);
@@ -334,10 +388,15 @@ ngx_http_lua_set_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 
     filter.data = filter_data;
 
+    //ngx_devel_kit
     return ndk_set_var_multi_value_core(cf, &target, &value[3], &filter);
 }
 
 
+/**
+ * set_by_lua_file 配置指令解析函数
+ * 
+ */
 char *
 ngx_http_lua_set_by_lua_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -400,6 +459,9 @@ ngx_http_lua_set_by_lua_file(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * set_by_lua_block/set_by_lua 的cmd->post
+ */
 ngx_int_t
 ngx_http_lua_filter_set_by_lua_inline(ngx_http_request_t *r, ngx_str_t *val,
     ngx_http_variable_value_t *v, void *data)
@@ -489,6 +551,9 @@ ngx_http_lua_filter_set_by_lua_file(ngx_http_request_t *r, ngx_str_t *val,
 #endif /* defined(NDK) && NDK */
 
 
+/**
+ * rewrite_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_rewrite_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -497,6 +562,7 @@ ngx_http_lua_rewrite_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     ngx_conf_t   save;
 
     save = *cf;
+    //rewrite_by_lua/rewrite_by_lua_file 配置指令解析函数
     cf->handler = ngx_http_lua_rewrite_by_lua;
     cf->handler_conf = conf;
 
@@ -508,6 +574,13 @@ ngx_http_lua_rewrite_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * rewrite_by_lua/rewrite_by_lua_file 配置指令解析
+ * 
+ * syntax: server_rewrite_by_lua_file <path-to-lua-script-file>
+ * 
+ * syntax: rewrite_by_lua <lua-script-str>
+ */
 char *
 ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -526,12 +599,14 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //rewrite_by_lua/rewrite_by_lua_file/rewrite_by_lua_block只能配置一个
     if (llcf->rewrite_handler) {
         return "is duplicate";
     }
 
     value = cf->args->elts;
 
+    // <lua-script-str> or <path-to-lua-script-file>
     if (value[1].len == 0) {
         /*  Oops...Invalid location conf */
         ngx_conf_log_error(NGX_LOG_ERR, cf, 0,
@@ -540,7 +615,9 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //配置指令为 rewrite_by_lua 或 rewrite_by_lua_block
     if (cmd->post == ngx_http_lua_rewrite_handler_inline) {
+        //生成代码块名称，示例：=rewrite_by_lua(nginx.conf:148)
         chunkname = ngx_http_lua_gen_chunk_name(cf, "rewrite_by_lua",
                                                 sizeof("rewrite_by_lua") - 1,
                                                 &chunkname_len);
@@ -548,6 +625,7 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
+        //生成代码块缓存用的 key，示例：rewrite_by_lua_nhli_6f30fa99b87d7f63b59c913687f45f65
         cache_key = ngx_http_lua_gen_chunk_cache_key(cf, "rewrite_by_lua",
                                                      value[1].data,
                                                      value[1].len);
@@ -560,17 +638,21 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         llcf->rewrite_chunkname = chunkname;
 
     } else {
+        //script-path, rewrite_by_lua_file 指令， 代码在文件中  
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
         ccv.cf = cf;
         ccv.value = &value[1];
         ccv.complex_value = &llcf->rewrite_src;
 
+        //文件名中可能有变量，场景：从请求 URL 中取一部分作为文件名。
         if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
 
+        //如果不包含变量
         if (llcf->rewrite_src.lengths == NULL) {
             /* no variable found */
+            //生成 cache key（注意文件名如果有变量，则不进行 cache）
             cache_key = ngx_http_lua_gen_file_cache_key(cf, value[1].data,
                                                         value[1].len);
             if (cache_key == NULL) {
@@ -580,17 +662,24 @@ ngx_http_lua_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     llcf->rewrite_src_key = cache_key;
+    //设置rewrite_handler  ngx_http_lua_rewrite_handler_inline
     llcf->rewrite_handler = (ngx_http_handler_pt) cmd->post;
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
 
+    //引导 ngx_http_lua_init 挂载 rewrite_phase handler
     lmcf->requires_rewrite = 1;
+    //引导 ngx_http_lua_init 挂载 capture_filter 进 output filter中，表示需要设置过滤器拦截请求的响应。
     lmcf->requires_capture_filter = 1;
 
     return NGX_CONF_OK;
 }
 
 
+/**
+ * server_rewrite_by_lua_block 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_server_rewrite_by_lua_block(ngx_conf_t *cf,
     ngx_command_t *cmd, void *conf)
@@ -609,6 +698,9 @@ ngx_http_lua_server_rewrite_by_lua_block(ngx_conf_t *cf,
 }
 
 
+/**
+ * server_rewrite_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_server_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -696,6 +788,9 @@ ngx_http_lua_server_rewrite_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * access_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_access_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -715,6 +810,9 @@ ngx_http_lua_access_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * access_by_lua_file/access_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -747,7 +845,9 @@ ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //ngx_http_lua_access_by_lua/ngx_http_lua_access_by_block
     if (cmd->post == ngx_http_lua_access_handler_inline) {
+        //生成lua代码段的chunk名称
         chunkname = ngx_http_lua_gen_chunk_name(cf, "access_by_lua",
                                                 sizeof("access_by_lua") - 1,
                                                 &chunkname_len);
@@ -755,6 +855,7 @@ ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
+        //生成代码块缓存用的 key
         cache_key = ngx_http_lua_gen_chunk_cache_key(cf, "access_by_lua",
                                                      value[1].data,
                                                      value[1].len);
@@ -767,15 +868,18 @@ ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         llcf->access_chunkname = chunkname;
 
     } else {
+        //access_by_lua_file
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
         ccv.cf = cf;
         ccv.value = &value[1];
         ccv.complex_value = &llcf->access_src;
 
+        //计算文件路径
         if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
 
+        //如果不包含变量，则生成cache_key
         if (llcf->access_src.lengths == NULL) {
             /* no variable found */
             cache_key = ngx_http_lua_gen_file_cache_key(cf, value[1].data,
@@ -798,6 +902,9 @@ ngx_http_lua_access_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * content_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -817,6 +924,12 @@ ngx_http_lua_content_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * content_by_lua 配置指令解析
+ * 
+ * syntax: content_by_lua <lua-script-str>
+ * 
+ */
 char *
 ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -836,6 +949,7 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //是cmd->post
     if (llcf->content_handler) {
         return "is duplicate";
     }
@@ -852,7 +966,9 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //content_by_lua/content_by_lua_block 的 cmd->post
     if (cmd->post == ngx_http_lua_content_handler_inline) {
+        //生成一个lua代码段的chunk名称
         chunkname = ngx_http_lua_gen_chunk_name(cf, "content_by_lua",
                                                 sizeof("content_by_lua") - 1,
                                                 &chunkname_len);
@@ -860,6 +976,7 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             return NGX_CONF_ERROR;
         }
 
+        // 生成代码块缓存用的 key
         cache_key = ngx_http_lua_gen_chunk_cache_key(cf, "content_by_lua",
                                                      value[1].data,
                                                      value[1].len);
@@ -872,15 +989,18 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         llcf->content_chunkname = chunkname;
 
     } else {
+        //content_by_lua_file
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
         ccv.cf = cf;
         ccv.value = &value[1];
         ccv.complex_value = &llcf->content_src;
 
+        //lua file 路径
         if (ngx_http_compile_complex_value(&ccv) != NGX_OK) {
             return NGX_CONF_ERROR;
         }
 
+        //不包含变量
         if (llcf->content_src.lengths == NULL) {
             /* no variable found */
             cache_key = ngx_http_lua_gen_file_cache_key(cf, value[1].data,
@@ -892,6 +1012,7 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     llcf->content_src_key = cache_key;
+    //设置回调函数为ngx_http_lua_content_handler_file
     llcf->content_handler = (ngx_http_handler_pt) cmd->post;
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
@@ -904,12 +1025,16 @@ ngx_http_lua_content_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_ERROR;
     }
 
+    //使用按需挂载处理函数的方式进行挂载, 注册content_handler
     clcf->handler = ngx_http_lua_content_handler;
 
     return NGX_CONF_OK;
 }
 
 
+/**
+ * log_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_log_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -929,6 +1054,9 @@ ngx_http_lua_log_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * log_by_lua_file/log_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_log_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -1011,6 +1139,9 @@ ngx_http_lua_log_by_lua(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 }
 
 
+/**
+ * header_filter_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_header_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1030,6 +1161,10 @@ ngx_http_lua_header_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * header_filter_by_lua/header_filter_by_lua_file 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_header_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1062,6 +1197,7 @@ ngx_http_lua_header_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
+    //header_filter_by_lua_file
     if (cmd->post == ngx_http_lua_header_filter_inline) {
         cache_key = ngx_http_lua_gen_chunk_cache_key(cf, "header_filter_by_lua",
                                                      value[1].data,
@@ -1081,6 +1217,7 @@ ngx_http_lua_header_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         llcf->header_filter_chunkname = chunkname;
 
     } else {
+        //header_filter_by_lua
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
         ccv.cf = cf;
         ccv.value = &value[1];
@@ -1105,12 +1242,16 @@ ngx_http_lua_header_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
 
+    //需要ngx_http_lua_init中挂载filter
     lmcf->requires_header_filter = 1;
 
     return NGX_CONF_OK;
 }
 
 
+/**
+ * body_filter_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_body_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1130,6 +1271,10 @@ ngx_http_lua_body_filter_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * body_filter_by_lua/body_filter_by_lua_file 配置指令解析
+ *
+ */
 char *
 ngx_http_lua_body_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1162,6 +1307,7 @@ ngx_http_lua_body_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
+    //body_filter_by_lua_file
     if (cmd->post == ngx_http_lua_body_filter_inline) {
         cache_key = ngx_http_lua_gen_chunk_cache_key(cf, "body_filter_by_lua",
                                                      value[1].data,
@@ -1182,6 +1328,7 @@ ngx_http_lua_body_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         llcf->body_filter_chunkname = chunkname;
 
     } else {
+        //body_filter_by_lua
         ngx_memzero(&ccv, sizeof(ngx_http_compile_complex_value_t));
         ccv.cf = cf;
         ccv.value = &value[1];
@@ -1206,13 +1353,18 @@ ngx_http_lua_body_filter_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
 
+    //指示ngx_http_lua_init注册body_filter
     lmcf->requires_body_filter = 1;
+    //指示ngx_http_lua_init注册header_filter
     lmcf->requires_header_filter = 1;
 
     return NGX_CONF_OK;
 }
 
 
+/**
+ * init_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_init_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1232,6 +1384,9 @@ ngx_http_lua_init_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_by_lua/init_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1249,6 +1404,7 @@ ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
+    //如果已经设置过回调了，就直接返回。
     if (lmcf->init_handler) {
         return "is duplicate";
     }
@@ -1262,9 +1418,12 @@ ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
+    //cmd->post
     lmcf->init_handler = (ngx_http_lua_main_conf_handler_pt) cmd->post;
 
+    //init_by_lua_file
     if (cmd->post == ngx_http_lua_init_by_file) {
+        //文件绝对路径
         name = ngx_http_lua_rebase_path(cf->pool, value[1].data,
                                         value[1].len);
         if (name == NULL) {
@@ -1275,8 +1434,10 @@ ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         lmcf->init_src.len = ngx_strlen(name);
 
     } else {
+        //init_by_lua, init_src为lua代码字符串
         lmcf->init_src = value[1];
 
+        //生成chunkname
         chunkname = ngx_http_lua_gen_chunk_name(cf, "init_by_lua",
                                                 sizeof("init_by_lua") - 1,
                                                 &chunkname_len);
@@ -1291,6 +1452,9 @@ ngx_http_lua_init_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_worker_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_init_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1310,6 +1474,9 @@ ngx_http_lua_init_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * init_worker_by_lua/init_worker_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1327,6 +1494,7 @@ ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
+    //不能重复设置
     if (lmcf->init_worker_handler) {
         return "is duplicate";
     }
@@ -1335,7 +1503,9 @@ ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 
     lmcf->init_worker_handler = (ngx_http_lua_main_conf_handler_pt) cmd->post;
 
+    //init_worker_by_lua_file
     if (cmd->post == ngx_http_lua_init_worker_by_file) {
+        //获取Lua文件路径
         name = ngx_http_lua_rebase_path(cf->pool, value[1].data,
                                         value[1].len);
         if (name == NULL) {
@@ -1346,6 +1516,7 @@ ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         lmcf->init_worker_src.len = ngx_strlen(name);
 
     } else {
+        //init_worker_by_lua
         lmcf->init_worker_src = value[1];
 
         chunkname = ngx_http_lua_gen_chunk_name(cf, "init_worker_by_lua",
@@ -1361,6 +1532,9 @@ ngx_http_lua_init_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * exit_worker_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_exit_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1380,6 +1554,9 @@ ngx_http_lua_exit_worker_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * exit_worker_by_lua/exit_worker_by_lua_file 配置指令解析
+ */
 char *
 ngx_http_lua_exit_worker_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1467,6 +1644,13 @@ ngx_http_lua_set_by_lua_init(ngx_http_request_t *r)
 #endif
 
 
+/**
+ * 生成一个lua代码段的chunk名称, 如 =content_by_lua(nginx.conf:90):3:
+ * 如*by_lua 或*by_lua_block
+ * 
+ * chunkname_len: 出参
+ * 返回：lua代码段的chunk名称
+ */
 u_char *
 ngx_http_lua_gen_chunk_name(ngx_conf_t *cf, const char *tag, size_t tag_len,
     size_t *chunkname_len)
@@ -1482,6 +1666,7 @@ ngx_http_lua_gen_chunk_name(ngx_conf_t *cf, const char *tag, size_t tag_len,
 
     ngx_http_lua_main_conf_t    *lmcf;
 
+    //chunk_name名称
     len = sizeof("=(:)") - 1 + tag_len + cf->conf_file->file.name.len
           + NGX_INT64_LEN + 1;
 
@@ -1547,6 +1732,9 @@ found:
 }
 
 
+/**
+ * 解析lua block
+ */
 /* a specialized version of the standard ngx_conf_parse() function */
 char *
 ngx_http_lua_conf_lua_block_parse(ngx_conf_t *cf, ngx_command_t *cmd)
@@ -1567,6 +1755,8 @@ ngx_http_lua_conf_lua_block_parse(ngx_conf_t *cf, ngx_command_t *cmd)
         parse_param,
     } type;
 
+    //检查一下配置文件的文件描述符，有效，则认为是在配置文件中使用的指令。
+    //无效，则认为是通过 Nginx 参数(-g)调用的。
     if (cf->conf_file->file.fd != NGX_INVALID_FILE) {
 
         type = parse_block;
@@ -1577,6 +1767,7 @@ ngx_http_lua_conf_lua_block_parse(ngx_conf_t *cf, ngx_command_t *cmd)
 
     saved = cf->args;
 
+    //创建args数组
     cf->args = ngx_array_create(cf->temp_pool, 4, sizeof(ngx_str_t));
     if (cf->args == NULL) {
         return NGX_CONF_ERROR;
@@ -1593,6 +1784,7 @@ ngx_http_lua_conf_lua_block_parse(ngx_conf_t *cf, ngx_command_t *cmd)
     ctx.start_line = start_line;
 
     for ( ;; ) {
+        //解析配置
         rc = ngx_http_lua_conf_read_lua_token(cf, &ctx);
 
         dd("parser start line: %d", (int) start_line);
@@ -1668,6 +1860,7 @@ ngx_http_lua_conf_lua_block_parse(ngx_conf_t *cf, ngx_command_t *cmd)
 
                 cf->args = saved;
 
+                //调用配置解析的handler
                 rv = (*cf->handler)(cf, cmd, cf->handler_conf);
                 if (rv == NGX_CONF_OK) {
                     goto done;
@@ -1971,6 +2164,13 @@ ngx_http_lua_conf_read_lua_token(ngx_conf_t *cf,
 }
 
 
+/**
+ * lua_capture_error_log 配置指令解析
+ * 
+ * syntax: lua_capture_error_log size
+ * context: http
+ * 
+ */
 char *
 ngx_http_lua_capture_error_log(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1988,6 +2188,7 @@ ngx_http_lua_capture_error_log(ngx_conf_t *cf, ngx_command_t *cmd,
     value = cf->args->elts;
     cycle = cf->cycle;
 
+    //重复配置
     if (lmcf->requires_capture_log) {
         return "is duplicate";
     }
@@ -1999,6 +2200,7 @@ ngx_http_lua_capture_error_log(ngx_conf_t *cf, ngx_command_t *cmd,
         return NGX_CONF_ERROR;
     }
 
+    //解析第二个参数
     size = ngx_parse_size(&value[1]);
 
     if (size < NGX_MAX_ERROR_STR) {
@@ -2013,12 +2215,14 @@ ngx_http_lua_capture_error_log(ngx_conf_t *cf, ngx_command_t *cmd,
         return "capture error log handler has been hooked";
     }
 
+    //创建用于捕获error_log的结构体
     ringbuf = (ngx_http_lua_log_ringbuf_t *)
               ngx_palloc(cf->pool, sizeof(ngx_http_lua_log_ringbuf_t));
     if (ringbuf == NULL) {
         return NGX_CONF_ERROR;
     }
 
+    //申请size大小的内存
     data = ngx_palloc(cf->pool, size);
     if (data == NULL) {
         return NGX_CONF_ERROR;

@@ -21,9 +21,13 @@ static ndk_set_var_value_pt ngx_http_lookup_ndk_set_var_directive(u_char *name,
     size_t name_len);
 
 
+/**
+ * 注入 ndk api
+ */
 void
 ngx_http_lua_inject_ndk_api(lua_State *L)
 {
+    //创建ndk表
     lua_createtable(L, 0, 1 /* nrec */);    /* ndk.* */
 
     lua_getglobal(L, "package"); /* ndk package */

@@ -40,12 +40,22 @@ static ngx_http_output_body_filter_pt ngx_http_next_body_filter;
  *         | code closure | <- top
  *         |      ...     |
  * */
+/**
+ * 初始化 Lua 虚拟机用于 body filter 的执行环境
+ * 
+ * 
+ * 把 request 结构体数据以及输入数据链 chain 作为全局变量入栈，并且把当前 Lua 虚拟机的全局变量数据带入新创建的环境数据中，
+ * 之所以要创建新的环境数据，大概是因为作者不希望 Lua 代码执行的结果影响到 Openresty 进程全局的环境数据，
+ * 而是尽可能的把本次的代码执行结果的影响限制在本次代码执行的环境数据中，达到隔离 Lua 代码执行的效果，从而实现一个安全的执行环境。
+ * 
+ */
 static void
 ngx_http_lua_body_filter_by_lua_env(lua_State *L, ngx_http_request_t *r,
     ngx_chain_t *in)
 {
     ngx_http_lua_main_conf_t    *lmcf;
 
+    // 把 request 请求结构体压入 Lua 虚拟机，
     ngx_http_lua_set_req(L, r);
 
     lmcf = ngx_http_get_module_main_conf(r, ngx_http_lua_module);
@@ -63,21 +73,30 @@ ngx_http_lua_body_filter_by_lua_env(lua_State *L, ngx_http_request_t *r,
      * all variables created in the script-env will be thrown away at the end
      * of the script run.
      * */
+    // 在栈顶创建一个 table 这里标记为@1 ，并在这个 table 创建名为 _G 的字段并赋值新的 table
     ngx_http_lua_create_new_globals_table(L, 0 /* narr */, 1 /* nrec */);
 
     /*  {{{ make new env inheriting main thread's globals table */
+    // 在栈顶创建一个 table 这里标记为@2 ，并把全局变量数组塞进这个 table 的 __index 字段中
     lua_createtable(L, 0, 1 /* nrec */);    /*  the metatable for the new
                                                 env */
     ngx_http_lua_get_globals_table(L);
     lua_setfield(L, -2, "__index");
+    // 把栈顶的 table 即 @2 出栈，并把 @2 作为 @1 的元表
     lua_setmetatable(L, -2);    /*  setmetatable({}, {__index = _G}) */
     /*  }}} */
 
+    // 把 @1 作为 Lua 虚拟机栈顶的 Lua 代码块的新环境数据 table
     lua_setfenv(L, -2);    /*  set new running env for the code closure */
 #endif /* OPENRESTY_LUAJIT */
 }
 
 
+/**
+ * ngx_http_lua_body_filter_inline(cmd->post)->.
+ * 
+ * 执行body_filter阶段的Lua代码
+ */
 ngx_int_t
 ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
     ngx_chain_t *in)
@@ -90,6 +109,7 @@ ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
 #endif
 
     dd("initialize nginx context in Lua VM, code chunk at stack top  sp = 1");
+    // 初始化 Lua 虚拟机用于 body filter 的执行环境
     ngx_http_lua_body_filter_by_lua_env(L, r, in);
 
 #if (NGX_PCRE)
@@ -97,12 +117,16 @@ ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
     old_pool = ngx_http_lua_pcre_malloc_init(r->pool);
 #endif
 
+    // traceback 入栈用于错误处理
     lua_pushcfunction(L, ngx_http_lua_traceback);
+    //traceback 函数被往下压， body filter 的代码块被放在栈顶
     lua_insert(L, 1);  /* put it under chunk and args */
 
+    //执行 Lua 代码块
     dd("protected call user code");
     rc = lua_pcall(L, 0, 1, 1);
 
+     // 从 Lua 虚拟机删除 traceback 函数 
     lua_remove(L, 1);  /* remove traceback function */
 
 #if (NGX_PCRE)
@@ -110,6 +134,7 @@ ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
     ngx_http_lua_pcre_malloc_done(old_pool);
 #endif
 
+    //错误处理
     if (rc != 0) {
 
         /*  error occurred */
@@ -123,6 +148,7 @@ ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
         ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                       "failed to run body_filter_by_lua*: %*s", len, err_msg);
 
+        // 把栈上所有元素移除
         lua_settop(L, 0);    /*  clear remaining elems on stack */
 
         return NGX_ERROR;
@@ -134,6 +160,7 @@ ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
 
     dd("got return value: %d", (int) rc);
 
+    // 把栈上所有元素移除
     lua_settop(L, 0);
 
     if (rc == NGX_ERROR || rc >= NGX_HTTP_SPECIAL_RESPONSE) {
@@ -144,6 +171,10 @@ ngx_http_lua_body_filter_by_chunk(lua_State *L, ngx_http_request_t *r,
 }
 
 
+/**
+ * body_filter_by_lua/body_filter_by_lua_block 的cmd->post
+ * 
+ */
 ngx_int_t
 ngx_http_lua_body_filter_inline(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -227,6 +258,10 @@ ngx_http_lua_body_filter_file(ngx_http_request_t *r, ngx_chain_t *in)
 }
 
 
+/**
+ * ngx_http_top_body_filter = ngx_http_lua_body_filter;
+ * 
+ */
 static ngx_int_t
 ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 {
@@ -244,6 +279,7 @@ ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
+    // 如果 location 没指定 Lua 代码，跳过本 filter
     if (llcf->body_filter_handler == NULL || r->header_only) {
         dd("no body filter handler found");
         return ngx_http_next_body_filter(r, in);
@@ -332,6 +368,8 @@ ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 
     if (in != NULL) {
         dd("calling body filter handler");
+         // 调用 filter 的 Lua 代码 
+        //ngx_http_lua_body_filter_inline or ngx_http_lua_body_filter_file
         rc = llcf->body_filter_handler(r, in);
 
         dd("calling body filter handler returned %d", (int) rc);
@@ -377,6 +415,7 @@ ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
         return NGX_ERROR;
     }
 
+    //整理并释放 ngx_http_lua_module 上下文中的 chain 的内存资源
     ngx_chain_update_chains(r->pool,
                             &ctx->free_bufs, &ctx->filter_busy_bufs, &out,
                             (ngx_buf_tag_t) &ngx_http_lua_body_filter);
@@ -385,6 +424,9 @@ ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
 }
 
 
+/**
+ * 如果配置了body_filter_by_lua指令， 安装ngx_http_lua_body_filter
+ * */
 ngx_int_t
 ngx_http_lua_body_filter_init(void)
 {
@@ -419,6 +461,9 @@ ngx_http_lua_ffi_get_body_filter_param_eof(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.arg[1]
+ */
 int
 ngx_http_lua_ffi_get_body_filter_param_body(ngx_http_request_t *r,
     u_char **data_p, size_t *len_p)
@@ -497,6 +542,9 @@ ngx_http_lua_ffi_copy_body_filter_param_body(ngx_http_request_t *r,
 }
 
 
+/**
+ * ngx.arg[1] = 'xx' 只能在body_filter阶段调用
+ */
 int
 ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
     ngx_http_lua_ctx_t *ctx)
@@ -518,6 +566,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     dd("index: %d", idx);
 
+    //idx只能是1或2
     if (idx != 1 && idx != 2) {
         return luaL_error(L, "bad index: %d", idx);
     }
@@ -526,7 +575,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     if (idx == 2) {
         /* overwriting the eof flag */
-        last = lua_toboolean(L, 3);
+        last = lua_toboolean(L, 3);     //ngx.arg[2]==true
 
         in = lmcf->body_filter_chain;
 
@@ -537,6 +586,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
              * before arg[2] = true
              */
             if (in == NULL) {
+                //获取一个ngx_chain_t
                 in = ngx_http_lua_chain_get_free_buf(r->connection->log,
                                                      r->pool,
                                                      &ctx->free_bufs, 0);
@@ -548,6 +598,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
                 lmcf->body_filter_chain = in;
             }
 
+            //遍历in，将最后一个节点last_buf或last_in_chain置1
             /* we set the "last_buf" or "last_in_chain" flag
              * in the last buf of "in" */
             for (cl = in; cl; cl = cl->next) {
@@ -564,10 +615,12 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
             }
 
         } else {
+            //ngx.arg[2]=0
             /* last == 0 */
 
             found = 0;
 
+            //遍历in，将最后一个节点last_buf或last_in_chain置0
             for (cl = in; cl; cl = cl->next) {
                 b = cl->buf;
 
@@ -605,12 +658,14 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
         break;
 
     case LUA_TNIL:
+        //ngx.arg[1]=nil
         /* discard the buffers */
 
         in = lmcf->body_filter_chain;
 
         last = 0;
 
+        //遍历cl, 将每个ngx_buf_t置为已消费
         for (cl = in; cl; cl = cl->next) {
             b = cl->buf;
 
@@ -631,6 +686,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
         goto done;
 
     case LUA_TTABLE:
+        //计算table的长度
         size = ngx_http_lua_calc_strlen_in_table(L, 3 /* index */, 3 /* arg */,
                                                  1 /* strict */);
         data = NULL;
@@ -645,6 +701,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     last = 0;
 
+    //遍历in链表，将其标记为已消费
     for (cl = in; cl; cl = cl->next) {
         b = cl->buf;
 
@@ -666,6 +723,7 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
         goto done;
     }
 
+    //申请size大小的内存空间ngx_buf_t， 同时将其挂在新申请的ngx_chain_t上
     cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
                                          &ctx->free_bufs, size);
     if (cl == NULL) {
@@ -674,9 +732,11 @@ ngx_http_lua_body_filter_param_set(lua_State *L, ngx_http_request_t *r,
 
     cl->buf->tag = (ngx_buf_tag_t) &ngx_http_lua_body_filter;
     if (type == LUA_TTABLE) {
+        //将table转为string, 复制进cl->buf
         cl->buf->last = ngx_http_lua_copy_str_in_table(L, 3, cl->buf->last);
 
     } else {
+        //将data指向的字符串复制进cl->buf
         cl->buf->last = ngx_copy(cl->buf->pos, data, size);
     }
 
@@ -684,6 +744,7 @@ done:
 
     if (last || flush) {
         if (cl == NULL) {
+            //获取一个ngx_chain_t
             cl = ngx_http_lua_chain_get_free_buf(r->connection->log,
                                                  r->pool,
                                                  &ctx->free_bufs, 0);
@@ -694,6 +755,7 @@ done:
             cl->buf->tag = (ngx_buf_tag_t) &ngx_http_lua_body_filter;
         }
 
+        //设置last标识
         if (last) {
             ctx->seen_last_in_filter = 1;
 
@@ -705,6 +767,7 @@ done:
             }
         }
 
+        //设置flush标识
         if (flush) {
             cl->buf->flush = 1;
         }

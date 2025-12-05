@@ -15,6 +15,7 @@
     ((ctx)->cur_co_ctx->is_uthread || (ctx)->cur_co_ctx == &(ctx)->entry_co_ctx)
 
 
+//是否是入口协程
 #define ngx_http_lua_is_entry_thread(ctx)                                    \
     ((ctx)->cur_co_ctx == &(ctx)->entry_co_ctx)
 
@@ -23,6 +24,7 @@
     ((ctx)->entry_co_ctx.co_ref != LUA_NOREF)
 
 
+//协程是否还在运行
 #define ngx_http_lua_coroutine_alive(coctx)                                  \
     ((coctx)->co_status != NGX_HTTP_LUA_CO_DEAD                              \
      && (coctx)->co_status != NGX_HTTP_LUA_CO_ZOMBIE)

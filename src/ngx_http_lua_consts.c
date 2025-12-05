@@ -14,6 +14,13 @@
 #include "ngx_http_lua_consts.h"
 
 
+/**
+ * ngx_http_lua_inject_ngx_api->.
+ * 
+ * 注入一些http常量
+ * 
+ * 如ngx.OK ngx.AGAIN 等
+ */
 void
 ngx_http_lua_inject_core_consts(lua_State *L)
 {
@@ -39,11 +46,19 @@ ngx_http_lua_inject_core_consts(lua_State *L)
 }
 
 
+/**
+ * ngx_http_lua_inject_ngx_api->.
+ * 
+ * 注入一些http常量
+ * 
+ * 如ngx.HTTP_GET ngx.HTTP_OK 等
+ */
 void
 ngx_http_lua_inject_http_consts(lua_State *L)
 {
     /* {{{ HTTP status constants */
     lua_pushinteger(L, NGX_HTTP_GET);
+    //ngx.HTTP_GET = NGX_HTTP_GET
     lua_setfield(L, -2, "HTTP_GET");
 
     lua_pushinteger(L, NGX_HTTP_POST);

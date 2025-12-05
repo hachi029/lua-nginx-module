@@ -154,6 +154,9 @@ ngx_http_lua_header_filter_by_chunk(lua_State *L, ngx_http_request_t *r)
 }
 
 
+/**
+ * header_filter_by_lua和header_filter_by_lua_block 的cmd->post
+ */
 ngx_int_t
 ngx_http_lua_header_filter_inline(ngx_http_request_t *r)
 {
@@ -183,6 +186,9 @@ ngx_http_lua_header_filter_inline(ngx_http_request_t *r)
 }
 
 
+/**
+ * header_filter_by_lua_file 的cmd->post
+ */
 ngx_int_t
 ngx_http_lua_header_filter_file(ngx_http_request_t *r)
 {
@@ -225,6 +231,10 @@ ngx_http_lua_header_filter_file(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx_http_top_header_filter
+ * 
+ */
 static ngx_int_t
 ngx_http_lua_header_filter(ngx_http_request_t *r)
 {
@@ -243,6 +253,7 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
         r->filter_need_in_memory = 1;
     }
 
+    // 如果 location 没指定 Lua 代码，跳过本 filter
     if (llcf->header_filter_handler == NULL) {
         dd("no header filter handler found");
         return ngx_http_next_header_filter(r);
@@ -252,6 +263,7 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
 
     dd("ctx = %p", ctx);
 
+    //初始化上下文结构体
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
         if (ctx == NULL) {
@@ -259,6 +271,7 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
         }
     }
 
+    //注册r->pool上的cleanup 
     if (ctx->cleanup == NULL) {
         cln = ngx_pool_cleanup_add(r->pool, 0);
         if (cln == NULL) {
@@ -273,11 +286,13 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
     old_context = ctx->context;
     ctx->context = NGX_HTTP_LUA_CONTEXT_HEADER_FILTER;
 
+    //ngx_http_lua_header_filter_inline or ngx_http_lua_header_filter_file
     dd("calling header filter handler");
     rc = llcf->header_filter_handler(r);
 
     ctx->context = old_context;
 
+    //根据 Lua 运行结果决定，是返回还是跑下去。
     if (rc == NGX_DECLINED) {
         return NGX_OK;
     }
@@ -286,10 +301,14 @@ ngx_http_lua_header_filter(ngx_http_request_t *r)
         return rc;
     }
 
+    // 执行下一个 filter 
     return ngx_http_next_header_filter(r);
 }
 
 
+/**
+ * 如果配置了header_filter_by_lua指令， 安装ngx_http_lua_header_filter
+ * */
 ngx_int_t
 ngx_http_lua_header_filter_init(void)
 {

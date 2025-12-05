@@ -145,6 +145,9 @@ ngx_http_lua_balancer_handler_inline(ngx_http_request_t *r,
 }
 
 
+/**
+ * balancer_by_lua_block 配置指令解析
+ */
 char *
 ngx_http_lua_balancer_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -164,6 +167,9 @@ ngx_http_lua_balancer_by_lua_block(ngx_conf_t *cf, ngx_command_t *cmd,
 }
 
 
+/**
+ * balancer_by_lua_file/balancer_by_lua 配置指令解析
+ */
 char *
 ngx_http_lua_balancer_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
     void *conf)
@@ -1342,6 +1348,9 @@ ngx_http_lua_ffi_balancer_set_upstream_tls(ngx_http_request_t *r, int on,
 }
 
 
+/**
+ * balancer_keepalive 配置指令解析
+ */
 char *
 ngx_http_lua_balancer_keepalive(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {

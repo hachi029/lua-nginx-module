@@ -105,6 +105,9 @@ ngx_http_lua_pcre_free(void *ptr)
 
 #if (NGX_PCRE2)
 
+/**
+ * 
+ */
 ngx_pool_t *
 ngx_http_lua_pcre_malloc_init(ngx_pool_t *pool)
 {

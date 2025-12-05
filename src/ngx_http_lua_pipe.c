@@ -145,6 +145,11 @@ enum {
 #define REASON_UNKNOWN_CODE  3
 
 
+/**
+ * ngx_http_lua_init->.
+ * https://github.com/openresty/lua-resty-core/blob/master/lib/ngx/pipe.md
+ * 初始化一颗红黑树，用于管道处理
+ */
 void
 ngx_http_lua_pipe_init(void)
 {
@@ -153,6 +158,9 @@ ngx_http_lua_pipe_init(void)
 }
 
 
+/**
+ * ngx_http_lua_init_worker->.
+ */
 ngx_int_t
 ngx_http_lua_pipe_add_signal_handler(ngx_cycle_t *cycle)
 {

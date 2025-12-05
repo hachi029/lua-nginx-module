@@ -17,6 +17,9 @@
 #define NGX_PROCESS_PRIVILEGED_AGENT    99
 
 
+/**
+ * ngx.worker.pid
+ */
 int
 ngx_http_lua_ffi_worker_pid(void)
 {
@@ -24,6 +27,10 @@ ngx_http_lua_ffi_worker_pid(void)
 }
 
 
+/**
+ * syntax: pids = ngx.worker.pids()
+ * 
+ */
 #if !(NGX_WIN32)
 int
 ngx_http_lua_ffi_worker_pids(int *pids, size_t *pids_len)
@@ -58,6 +65,9 @@ ngx_http_lua_ffi_worker_pids(int *pids, size_t *pids_len)
 #endif
 
 
+/**
+ * syntax: id = ngx.worker.id()
+ */
 int
 ngx_http_lua_ffi_worker_id(void)
 {
@@ -75,6 +85,9 @@ ngx_http_lua_ffi_worker_id(void)
 }
 
 
+/**
+ * syntax: exiting = ngx.worker.exiting()
+ */
 int
 ngx_http_lua_ffi_worker_exiting(void)
 {
@@ -82,6 +95,10 @@ ngx_http_lua_ffi_worker_exiting(void)
 }
 
 
+/**
+ * syntax: count = ngx.worker.count()
+ * 
+ */
 int
 ngx_http_lua_ffi_worker_count(void)
 {
@@ -94,6 +111,9 @@ ngx_http_lua_ffi_worker_count(void)
 }
 
 
+/**
+ * 
+ */
 int
 ngx_http_lua_ffi_master_pid(void)
 {
@@ -109,6 +129,16 @@ ngx_http_lua_ffi_master_pid(void)
 }
 
 
+/**
+ * syntax: type_name = process_module.type()
+ * 读取 ngx_process 全局变量
+ *  [0 ]  = "single",
+    [1 ]  = "master",
+    [2 ]  = "signaller",
+    [3 ]  = "worker",
+    [4 ]  = "helper",
+    [99]  = "privileged agent",
+ */
 int
 ngx_http_lua_ffi_get_process_type(void)
 {
@@ -162,6 +192,11 @@ ngx_http_lua_ffi_enable_privileged_agent(char **err)
 }
 
 
+/**
+ * https://github.com/hachi029/lua-resty-core/blob/master/lib/ngx/process.md#signal_graceful_exit
+ * 
+ * syntax: process_module.signal_graceful_exit()
+ */
 void
 ngx_http_lua_ffi_process_signal_graceful_exit(void)
 {

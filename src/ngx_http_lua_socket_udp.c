@@ -124,6 +124,9 @@ ngx_http_lua_inject_socket_udp_api(ngx_log_t *log, lua_State *L)
 }
 
 
+/**
+ * syntax: udpsock = ngx.socket.udp()
+ */
 static int
 ngx_http_lua_socket_udp(lua_State *L)
 {
@@ -145,6 +148,7 @@ ngx_http_lua_socket_udp(lua_State *L)
         return luaL_error(L, "no ctx found");
     }
 
+    //确保当前阶段是YIELDABLE
     ngx_http_lua_check_context(L, ctx, NGX_HTTP_LUA_CONTEXT_YIELDABLE);
 
     lua_createtable(L, 3 /* narr */, 1 /* nrec */);
@@ -159,6 +163,11 @@ ngx_http_lua_socket_udp(lua_State *L)
 }
 
 
+/**
+ * syntax: ok, err = udpsock:setpeername(host, port)
+ * 
+ * syntax: ok, err = udpsock:setpeername("unix:/path/to/unix-domain.socket")
+ */
 static int
 ngx_http_lua_socket_udp_setpeername(lua_State *L)
 {
@@ -208,6 +217,7 @@ ngx_http_lua_socket_udp_setpeername(lua_State *L)
 
     luaL_checktype(L, 1, LUA_TTABLE);
 
+    //host
     p = (u_char *) luaL_checklstring(L, 2, &len);
 
     host.data = ngx_palloc(r->pool, len + 1);
@@ -217,9 +227,11 @@ ngx_http_lua_socket_udp_setpeername(lua_State *L)
 
     host.len = len;
 
+    //从栈中复制出host
     ngx_memcpy(host.data, p, len);
     host.data[len] = '\0';
 
+    //port
     if (n == 3) {
         port = luaL_checkinteger(L, 3);
 
@@ -1530,6 +1542,9 @@ ngx_http_lua_udp_connect(ngx_http_lua_udp_connection_t *uc, ngx_addr_t *local)
 }
 
 
+/**
+ * syntax: ok, err = udpsock:close()
+ */
 static int
 ngx_http_lua_socket_udp_close(lua_State *L)
 {

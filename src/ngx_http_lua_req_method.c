@@ -13,6 +13,10 @@
 #include "ngx_http_lua_subrequest.h"
 
 
+/**
+ *  ngx.req.get_method
+ *  返回的只是一个整数，在lua层映射为字符串格式
+ */
 int
 ngx_http_lua_ffi_req_get_method(ngx_http_request_t *r)
 {
@@ -24,6 +28,10 @@ ngx_http_lua_ffi_req_get_method(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx.req.get_method
+ * 如果根据上边的方法返回的id在lua层映射不到，会再尝试调用本方法
+ */
 int
 ngx_http_lua_ffi_req_get_method_name(ngx_http_request_t *r, u_char **name,
     size_t *len)
@@ -39,6 +47,9 @@ ngx_http_lua_ffi_req_get_method_name(ngx_http_request_t *r, u_char **name,
 }
 
 
+/**
+ * ngx.req.set_method 
+ */
 int
 ngx_http_lua_ffi_req_set_method(ngx_http_request_t *r, int method)
 {

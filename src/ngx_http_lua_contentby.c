@@ -21,6 +21,16 @@
 static void ngx_http_lua_content_phase_post_read(ngx_http_request_t *r);
 
 
+/**
+ * content_by_lua*
+ * 
+ * 如果是content_by_lua_file, 会将file的内容读到栈顶，再调用此函数
+ * 如果是content_by_lua/如果是content_by_lua_block, 则通过ngx_http_lua_content_handler_inline调过来
+ * 
+ * ngx_http_lua_content_handler->ngx_http_lua_content_handler_file->.
+ * ngx_http_lua_content_handler->ngx_http_lua_content_handler_inline->.
+ * 
+ */
 ngx_int_t
 ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
 {
@@ -50,6 +60,7 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
 
     ctx->entered_content_phase = 1;
 
+    //生成一个协程(coroutine)
     /*  {{{ new coroutine to handle request */
     co = ngx_http_lua_new_thread(r, L, &co_ref);
 
@@ -121,6 +132,7 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
         r->read_event_handler = ngx_http_block_reading;
     }
 
+    //执行上边创建的coroutine
     rc = ngx_http_lua_run_thread(L, r, ctx, 0);
 
     if (rc == NGX_ERROR || rc >= NGX_OK) {
@@ -139,6 +151,16 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
 }
 
 
+/**
+ * content阶段的 write_event_handler。直接调用  ctx->resume_handler(r);
+ * 
+ * if (ctx->entered_content_phase) {
+ *      r->write_event_handler = ngx_http_lua_content_wev_handler;
+ *
+ *  } else {
+ *      r->write_event_handler = ngx_http_core_run_phases;
+ *  }
+ */
 void
 ngx_http_lua_content_wev_handler(ngx_http_request_t *r)
 {
@@ -153,6 +175,9 @@ ngx_http_lua_content_wev_handler(ngx_http_request_t *r)
 }
 
 
+/**
+ * conetnt_by_lua* 的content_handler 
+ */
 ngx_int_t
 ngx_http_lua_content_handler(ngx_http_request_t *r)
 {
@@ -164,6 +189,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
                    "lua content handler, uri:\"%V\" c:%ud", &r->uri,
                    r->main->count);
 
+    //获取请求在ngx_http_module模块对应的上下文结构
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
     if (llcf->content_handler == NULL) {
@@ -175,6 +201,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
 
     dd("ctx = %p", ctx);
 
+    //如果之前没有设置过上下文，调用ngx_http_lua_create_ctx创建上下文结构
     if (ctx == NULL) {
         ctx = ngx_http_lua_create_ctx(r);
         if (ctx == NULL) {
@@ -188,6 +215,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
         return NGX_DONE;
     }
 
+    //如果ctx->entered_content_phase为1，则不是首次调度此方法，执行ctx->resume_handler
     if (ctx->entered_content_phase) {
         dd("calling wev handler");
         rc = ctx->resume_handler(r);
@@ -195,6 +223,7 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
         return rc;
     }
 
+    //如果配置了需要读取请求体，但还没有读取
     if (llcf->force_read_body && !ctx->read_body_done) {
         r->request_body_in_single_buf = 1;
         r->request_body_in_persistent_file = 1;
@@ -216,9 +245,11 @@ ngx_http_lua_content_handler(ngx_http_request_t *r)
 
     dd("setting entered");
 
+    //置1
     ctx->entered_content_phase = 1;
 
     dd("calling content handler");
+    // ngx_http_lua_content_handler_file/ngx_http_lua_content_handler_inline
     return llcf->content_handler(r);
 }
 
@@ -243,6 +274,10 @@ ngx_http_lua_content_phase_post_read(ngx_http_request_t *r)
 }
 
 
+/**
+ * ngx_http_lua_content_handler->.
+ * 
+ */
 ngx_int_t
 ngx_http_lua_content_handler_file(ngx_http_request_t *r)
 {
@@ -254,10 +289,12 @@ ngx_http_lua_content_handler_file(ngx_http_request_t *r)
 
     llcf = ngx_http_get_module_loc_conf(r, ngx_http_lua_module);
 
+    //计算文件路径
     if (ngx_http_complex_value(r, &llcf->content_src, &eval_src) != NGX_OK) {
         return NGX_ERROR;
     }
 
+    //获取lua文件的路径
     script_path = ngx_http_lua_rebase_path(r->pool, eval_src.data,
                                            eval_src.len);
 
@@ -265,9 +302,11 @@ ngx_http_lua_content_handler_file(ngx_http_request_t *r)
         return NGX_ERROR;
     }
 
+    //获得lua_state,如果请求有自己的lua_state则使用请求自己的lua_state，否则使用ngx_http_lua_module模块的lua_state
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
     /*  load Lua script file (w/ cache)        sp = 1 */
+    //加载代码
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L, script_path,
                                      &llcf->content_src_ref,
                                      llcf->content_src_key);
@@ -282,10 +321,16 @@ ngx_http_lua_content_handler_file(ngx_http_request_t *r)
     /*  make sure we have a valid code chunk */
     ngx_http_lua_assert(lua_isfunction(L, -1));
 
+    //创建协程执行代码的函数
     return ngx_http_lua_content_by_chunk(L, r);
 }
 
 
+/**
+ * ngx_http_lua_content_handler->.
+ * 
+ * content_by_lua/content_by_lua_block 的cmd->post
+ */
 ngx_int_t
 ngx_http_lua_content_handler_inline(ngx_http_request_t *r)
 {

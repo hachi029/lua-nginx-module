@@ -102,6 +102,7 @@ static ngx_conf_post_t  ngx_http_lua_ssl_conf_command_post =
 
 static ngx_command_t ngx_http_lua_cmds[] = {
 
+    //deprecated, 是否加载resty.core. 
     { ngx_string("lua_load_resty_core"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
       ngx_http_lua_load_resty_core,
@@ -396,7 +397,7 @@ static ngx_command_t ngx_http_lua_cmds[] = {
       ngx_http_lua_rewrite_by_lua,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
-      (void *) ngx_http_lua_rewrite_handler_file },
+      (void *) ngx_http_lua_rewrite_handler_file },//cmd->post
 
     { ngx_string("rewrite_by_lua_no_postpone"),
       NGX_HTTP_MAIN_CONF|NGX_CONF_FLAG,
@@ -745,6 +746,11 @@ static ngx_http_module_t ngx_http_lua_module_ctx = {
 };
 
 
+/**
+ * https://github.com/openresty/lua-nginx-module
+ * 
+ * ngx_http_lua_module 模块定义
+ */
 ngx_module_t ngx_http_lua_module = {
     NGX_MODULE_V1,
     &ngx_http_lua_module_ctx,   /*  module context */
@@ -752,6 +758,9 @@ ngx_module_t ngx_http_lua_module = {
     NGX_HTTP_MODULE,            /*  module type */
     NULL,                       /*  init master */
     NULL,                       /*  init module */
+    /**
+     * 在 master/worker模式下，在每个 worker进程的初始化过程会调用所有模块的init_process函数
+     */
     ngx_http_lua_init_worker,   /*  init process */
     NULL,                       /*  init thread */
     NULL,                       /*  exit thread */
@@ -761,6 +770,13 @@ ngx_module_t ngx_http_lua_module = {
 };
 
 
+/**
+ * postconfiguration 配置解析完成后调用
+ * 1. 挂载各阶段的handler
+ * 2. 初始化Lua虚拟机Lua_state, 注入api, 设置到lmcf->lua
+ * 3. 如果没有配置共享字典，则执行init_by_lua_*阶段设置的lua代码
+ * 
+ */
 static ngx_int_t
 ngx_http_lua_init(ngx_conf_t *cf)
 {
@@ -774,12 +790,15 @@ ngx_http_lua_init(ngx_conf_t *cf)
     ngx_pool_cleanup_t         *cln;
     ngx_str_t                   name = ngx_string("host");
 
+    //发送信号进程或测试配置， 不继续执行
     if (ngx_process == NGX_PROCESS_SIGNALLER || ngx_test_config) {
         return NGX_OK;
     }
 
+    //获取main级别配置 
     lmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_lua_module);
 
+    //获取$host变量的索引
     lmcf->host_var_index = ngx_http_get_variable_index(cf, &name);
     if (lmcf->host_var_index == NGX_ERROR) {
         return NGX_ERROR;
@@ -794,22 +813,26 @@ ngx_http_lua_init(ngx_conf_t *cf)
     }
 
     if (multi_http_blocks || lmcf->requires_capture_filter) {
+        //安装一个header filter和一个body filte
         rc = ngx_http_lua_capture_filter_init(cf);
         if (rc != NGX_OK) {
             return rc;
         }
     }
 
+    //设置默认值
     if (lmcf->postponed_to_rewrite_phase_end == NGX_CONF_UNSET) {
         lmcf->postponed_to_rewrite_phase_end = 0;
     }
 
+    //设置默认值
     if (lmcf->postponed_to_access_phase_end == NGX_CONF_UNSET) {
         lmcf->postponed_to_access_phase_end = 0;
     }
 
     cmcf = ngx_http_conf_get_module_main_conf(cf, ngx_http_core_module);
 
+    //如果配置了server_rewrite_by_lua指令， 安装一个SERVER_REWRITE_PHASE的handler
     if (lmcf->requires_server_rewrite) {
         h = ngx_array_push(
           &cmcf->phases[NGX_HTTP_SERVER_REWRITE_PHASE].handlers);
@@ -820,6 +843,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         *h = ngx_http_lua_server_rewrite_handler;
     }
 
+    //如果配置了rewrite_by_lua指令， 安装一个REWRITE_PHASE的handler
     if (lmcf->requires_rewrite) {
         h = ngx_array_push(&cmcf->phases[NGX_HTTP_REWRITE_PHASE].handlers);
         if (h == NULL) {
@@ -829,6 +853,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         *h = ngx_http_lua_rewrite_handler;
     }
 
+    //如果配置了access_by_lua指令， 安装一个ACCESS_PHASE的handler
     if (lmcf->requires_access) {
         h = ngx_array_push(&cmcf->phases[NGX_HTTP_ACCESS_PHASE].handlers);
         if (h == NULL) {
@@ -840,6 +865,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
     dd("requires log: %d", (int) lmcf->requires_log);
 
+    //如果配置了log_by_lua指令， 安装一个LOG_PHASE的handler
     if (lmcf->requires_log) {
         arr = &cmcf->phases[NGX_HTTP_LOG_PHASE].handlers;
         h = ngx_array_push(arr);
@@ -847,8 +873,10 @@ ngx_http_lua_init(ngx_conf_t *cf)
             return NGX_ERROR;
         }
 
+        //如果有多个log handlers， 将本模块的log_handler置为第一个
         if (arr->nelts > 1) {
             h = arr->elts;
+            //ngx_memmove(dst, src, n)
             ngx_memmove(&h[1], h,
                         (arr->nelts - 1) * sizeof(ngx_http_handler_pt));
         }
@@ -856,6 +884,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         *h = ngx_http_lua_log_handler;
     }
 
+    //如果配置了header_filter_by_lua指令， 安装 ngx_http_lua_header_filter
     if (multi_http_blocks || lmcf->requires_header_filter) {
         rc = ngx_http_lua_header_filter_init();
         if (rc != NGX_OK) {
@@ -863,6 +892,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         }
     }
 
+    //如果配置了body_filter_by_lua指令， 安装ngx_http_lua_body_filter
     if (multi_http_blocks || lmcf->requires_body_filter) {
         rc = ngx_http_lua_body_filter_init();
         if (rc != NGX_OK) {
@@ -870,6 +900,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
         }
     }
 
+    //添加一个清理函数 ngx_http_lua_sema_mm_cleanup
     /* add the cleanup of semaphores after the lua_close */
     cln = ngx_pool_cleanup_add(cf->pool, 0);
     if (cln == NULL) {
@@ -879,6 +910,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
     cln->data = lmcf;
     cln->handler = ngx_http_lua_sema_mm_cleanup;
 
+    //添加一个清理函数 ngx_http_lua_regex_cleanup
 #if (NGX_PCRE2)
     /* add the cleanup of pcre2 regex */
     cln = ngx_pool_cleanup_add(cf->pool, 0);
@@ -894,6 +926,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
     ngx_http_lua_pipe_init();
 #endif
 
+    //添加一个清理函数 ngx_http_lua_ngx_raw_header_cleanup
 #if (nginx_version >= 1011011)
     cln = ngx_pool_cleanup_add(cf->pool, 0);
     if (cln == NULL) {
@@ -904,6 +937,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
     cln->handler = ngx_http_lua_ngx_raw_header_cleanup;
 #endif
 
+    //如果没有初始化过Lua虚拟机， 则初始化它
     if (lmcf->lua == NULL) {
         dd("initializing lua vm");
 
@@ -941,6 +975,7 @@ ngx_http_lua_init(ngx_conf_t *cf)
                                   ngx_http_lua_hash_literal("content-length");
         ngx_http_lua_location_hash = ngx_http_lua_hash_literal("location");
 
+        //初始化Lua虚拟机Lua_state, 注入api, 设置lmcf->lua
         rc = ngx_http_lua_init_vm(&lmcf->lua, NULL, cf->cycle, cf->pool,
                                   lmcf, cf->log, NULL);
         if (rc != NGX_OK) {
@@ -968,10 +1003,17 @@ ngx_http_lua_init(ngx_conf_t *cf)
 
         ngx_http_lua_assert(lmcf->lua != NULL);
 
+        //https://github.com/LomoX-Offical/openresty-source-code-analysis/blob/master/lua-nginx-module/ngx_shared_dict.md
+        // 判断 requires_shm 被设置为1，就不执行 init_handler 了(执行init_by_lua*相关代码)。
+        //因为此时shared_memory还没有初始化，ngx.shared_dic*相关api还无法使用, 
+        //为了能在init_by_lua_*阶段使用ngx.shared_dic*相关api, 延后到 ngx_http_lua_shared_memory_init 方法中执行
+        //调用lmcf->init_handler 
         if (!lmcf->requires_shm && lmcf->init_handler) {
             saved_cycle = ngx_cycle;
             ngx_cycle = cf->cycle;
 
+            //执行init_by_lua_*阶段的lua代码
+            //ngx_http_lua_init_by_inline or ngx_http_lua_init_by_file 
             rc = lmcf->init_handler(cf->log, lmcf, lmcf->lua);
 
             ngx_cycle = saved_cycle;
@@ -1018,6 +1060,9 @@ ngx_http_lua_lowat_check(ngx_conf_t *cf, void *post, void *data)
 }
 
 
+/**
+ * 创建模块main级别配置结构体
+ */
 static void *
 ngx_http_lua_create_main_conf(ngx_conf_t *cf)
 {
@@ -1025,6 +1070,7 @@ ngx_http_lua_create_main_conf(ngx_conf_t *cf)
 
     ngx_http_lua_main_conf_t    *lmcf;
 
+    //创建配置结构体
     lmcf = ngx_pcalloc(cf->pool, sizeof(ngx_http_lua_main_conf_t));
     if (lmcf == NULL) {
         return NULL;
@@ -1078,6 +1124,7 @@ ngx_http_lua_create_main_conf(ngx_conf_t *cf)
     lmcf->malloc_trim_cycle = NGX_CONF_UNSET_UINT;
 #endif
 
+    //初始化 lmcf->sema_mm 结构体 ngx_http_lua_sema_mm_t ， 用于semaphore对象缓存/管理
     rc = ngx_http_lua_sema_mm_init(cf, lmcf);
     if (rc != NGX_OK) {
         return NULL;
@@ -1091,6 +1138,12 @@ ngx_http_lua_create_main_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * 初始化模块main级别配置结构体， 在配置解析结束后执行。
+ * 
+ * 主要是设置main级别配置结构体的默认值
+ * 
+ */
 static char *
 ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
 {
@@ -1149,12 +1202,15 @@ ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
     lmcf->cycle = cf->cycle;
 
     ngx_queue_init(&lmcf->free_lua_threads);
+    //初始化
     ngx_queue_init(&lmcf->cached_lua_threads);
 
 #ifdef HAVE_LUA_RESETTHREAD
+    //初始化 lmcf->free_lua_threads cache
     n = lmcf->lua_thread_cache_max_entries;
 
     if (n > 0) {
+        //预先创建 n 个 ngx_http_lua_thread_ref_t 结构体
         trefs = ngx_palloc(cf->pool, n * sizeof(ngx_http_lua_thread_ref_t));
         if (trefs == NULL) {
             return NGX_CONF_ERROR;
@@ -1172,6 +1228,7 @@ ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
         lmcf->worker_thread_vm_pool_size = 10;
     }
 
+    //初始化hash表 lmcf->builtin_headers_out
     if (ngx_http_lua_init_builtin_headers_out(cf, lmcf) != NGX_OK) {
         ngx_conf_log_error(NGX_LOG_EMERG, cf, 0, "init header out error");
 
@@ -1185,6 +1242,10 @@ ngx_http_lua_init_main_conf(ngx_conf_t *cf, void *conf)
 }
 
 
+/**
+ * 创建模块server级别配置结构体
+ * 
+ */
 static void *
 ngx_http_lua_create_srv_conf(ngx_conf_t *cf)
 {
@@ -1243,6 +1304,10 @@ ngx_http_lua_create_srv_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * 合并server级别配置结构体
+ * 
+ */
 static char *
 ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -1399,11 +1464,15 @@ ngx_http_lua_merge_srv_conf(ngx_conf_t *cf, void *parent, void *child)
 }
 
 
+/**
+ * 创建模块location级别配置结构体
+ */
 static void *
 ngx_http_lua_create_loc_conf(ngx_conf_t *cf)
 {
     ngx_http_lua_loc_conf_t *conf;
 
+    //创建结构体 ngx_http_lua_loc_conf_t
     conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_lua_loc_conf_t));
     if (conf == NULL) {
         return NULL;
@@ -1485,6 +1554,9 @@ ngx_http_lua_create_loc_conf(ngx_conf_t *cf)
 }
 
 
+/**
+ * 合并模块location级别配置结构体
+ */
 static char *
 ngx_http_lua_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 {
@@ -1866,6 +1938,7 @@ ngx_http_lua_ssl_conf_command_check(ngx_conf_t *cf, void *post, void *data)
 #endif  /* NGX_HTTP_SSL */
 
 
+//配置指令lua_malloc_trim解析
 static char *
 ngx_http_lua_malloc_trim(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
@@ -1889,6 +1962,7 @@ ngx_http_lua_malloc_trim(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
         return NGX_CONF_OK;
     }
 
+    //requires_log置位
     lmcf->requires_log = 1;
 
 #else
