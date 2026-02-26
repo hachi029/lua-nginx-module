@@ -51,6 +51,8 @@ ngx_http_lua_access_handler(ngx_http_request_t *r)
 
     //https://github.com/openresty/lua-nginx-module?tab=readme-ov-file#access_by_lua_no_postpone
     //默认值为0，即将lua代码放到access阶段的所有handler最后执行
+    // Controls whether or not to disable postponing access_by_lua* directives to run at the end of the access request-processing phase. 
+    //By default, this directive is turned off and the Lua code is postponed to run at the end of the access phase
     if (!lmcf->postponed_to_access_phase_end) {
 
         //只在首个请求到来时进入这个逻辑

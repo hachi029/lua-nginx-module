@@ -127,13 +127,15 @@ ngx_http_lua_ffi_get_ctx_ref(ngx_http_request_t *r, int *in_ssl_phase,
 
 
 /**
- * 设置ngx.ctx 在ctxs数组中的的索引值
+ * 参考 resty/core/ctx.lua。当首次获取ngx.ctx表时调用
+ * 设置ngx.ctx 在ctxs数组中的的索引值,即将ref存储在 ctx->ctx_ref 中
  */
 int
 ngx_http_lua_ffi_set_ctx_ref(ngx_http_request_t *r, int ref)
 {
     ngx_pool_t                      *pool;
-    ngx_http_lua_ctx_t              *ctx;
+    ngx_http_lua_ctx_t  hachi
+                *ctx;
 #if (NGX_HTTP_SSL)
     ngx_connection_t                *c;
     ngx_http_lua_ssl_ctx_t          *ssl_ctx;
@@ -179,7 +181,8 @@ ngx_http_lua_ffi_set_ctx_ref(ngx_http_request_t *r, int ref)
 
 
 /**
- * 添加一个请求结束时的回调，用于清理ngx.ctx(从ctxs数组中将ngx.ctx移除)
+ * ngx_http_lua_ffi_set_ctx_ref -> .
+ * 添加一个请求结束时(添加在r->pool上)的回调，用于清理ngx.ctx(从ctxs数组中将ngx.ctx移除)
  */
 static ngx_int_t
 ngx_http_lua_ngx_ctx_add_cleanup(ngx_http_request_t *r, ngx_pool_t *pool,
@@ -194,7 +197,7 @@ ngx_http_lua_ngx_ctx_add_cleanup(ngx_http_request_t *r, ngx_pool_t *pool,
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     L = ngx_http_lua_get_lua_vm(r, ctx);
 
-    //添加一个ngx_http_lua_ngx_ctx_cleanup_data_t结构体
+    // 添加一个ngx_http_lua_ngx_ctx_cleanup_data_t 结构体
     cln = ngx_pool_cleanup_add(pool,
                                sizeof(ngx_http_lua_ngx_ctx_cleanup_data_t));
     if (cln == NULL) {
@@ -213,7 +216,7 @@ ngx_http_lua_ngx_ctx_add_cleanup(ngx_http_request_t *r, ngx_pool_t *pool,
 
 
 /**
- * 请求结束时的回调，用于清理ngx.ctx
+ * 请求结束时(添加在r->pool上)的回调，用于清理ngx.ctx。 参考 ngx_http_lua_ngx_ctx_add_cleanup
  */
 static void
 ngx_http_lua_ngx_ctx_cleanup(void *data)

@@ -557,7 +557,7 @@ typedef struct {
     //配置指令 lua_socket_pool_size
     ngx_uint_t                       pool_size;
 
-    //lua_transform_underscores_in_response_headers 配置指令标识
+    //lua_transform_underscores_in_response_headers 配置指令标识 https://github.com/openresty/lua-nginx-module?tab=readme-ov-file#lua_transform_underscores_in_response_headers
     ngx_flag_t                       transform_underscores_in_resp_headers;
     //lua_socket_log_errors 配置指令标识
     ngx_flag_t                       log_socket_errors;
