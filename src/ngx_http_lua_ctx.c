@@ -139,8 +139,7 @@ int
 ngx_http_lua_ffi_set_ctx_ref(ngx_http_request_t *r, int ref)
 {
     ngx_pool_t                      *pool;
-    ngx_http_lua_ctx_t  hachi
-                *ctx;
+    ngx_http_lua_ctx_t              *ctx;
 #if (NGX_HTTP_SSL)
     ngx_connection_t                *c;
     ngx_http_lua_ssl_ctx_t          *ssl_ctx;
