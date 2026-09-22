@@ -89,7 +89,7 @@ ngx_http_lua_ngx_req_set_uri(lua_State *L)
         //分配空间
         buf = ngx_palloc(r->pool, buf_len);
         if (buf == NULL) {
-            return NGX_ERROR;
+            return luaL_error(L, "no memory");
         }
 
         //进行转义
@@ -114,10 +114,12 @@ ngx_http_lua_ngx_req_set_uri(lua_State *L)
                 return luaL_error(L, "no ctx found");
             }
 
-            dd("server_rewrite: %d, rewrite: %d, access: %d, content: %d",
+            dd("server_rewrite: %d, rewrite: %d, access: %d, "
+               "precontent: %d, content: %d",
                (int) ctx->entered_server_rewrite_phase,
                (int) ctx->entered_rewrite_phase,
                (int) ctx->entered_access_phase,
+               (int) ctx->entered_precontent_phase,
                (int) ctx->entered_content_phase);
 
             //jump为true, 只能在rewrite_by_lua*阶段执行

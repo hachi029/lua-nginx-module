@@ -1208,6 +1208,7 @@ ngx_http_lua_reset_ctx(ngx_http_request_t *r, lua_State *L,
     ctx->entered_server_rewrite_phase = 0;
     ctx->entered_rewrite_phase = 0;
     ctx->entered_access_phase = 0;
+    ctx->entered_precontent_phase = 0;
     ctx->entered_content_phase = 0;
 
     ctx->exit_code = 0;
@@ -1693,9 +1694,11 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                     }
                     /** 父协程也不存在了 */
 
-                    //删除协程
-                    ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
-                    ctx->uthreads--;
+                    if (ctx->cur_co_ctx->co_ref != LUA_NOREF) {
+                        //删除协程
+                        ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
+                        ctx->uthreads--;
+                    }
 
                     if (ctx->uthreads == 0) {
                         if (ngx_http_lua_entry_thread_alive(ctx)) {
@@ -1738,7 +1741,9 @@ user_co_done:   //子协程执行结束，父协程正在wait子协程
                 }
 
                 //销毁当前子协程
-                if (ctx->cur_co_ctx->is_uthread) {
+                if (ctx->cur_co_ctx->is_uthread
+                    && ctx->cur_co_ctx->co_ref != LUA_NOREF)
+                {
                     ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
                     ctx->uthreads--;
                 }
@@ -1858,8 +1863,10 @@ propagate_error:
                     return NGX_AGAIN;
                 }
 
-                ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
-                ctx->uthreads--;
+                if (ctx->cur_co_ctx->co_ref != LUA_NOREF) {
+                    ngx_http_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
+                    ctx->uthreads--;
+                }
 
                 if (ctx->uthreads == 0) {
                     if (ngx_http_lua_entry_thread_alive(ctx)) {
@@ -1966,6 +1973,14 @@ no_parent:
                 NGX_ERROR : NGX_HTTP_INTERNAL_SERVER_ERROR;
 
 done:
+
+#if HAVE_LUA_PROXY_SSL
+    if (ctx->context == NGX_HTTP_LUA_CONTEXT_PROXY_SSL_CERT
+        || ctx->context == NGX_HTTP_LUA_CONTEXT_PROXY_SSL_VERIFY)
+    {
+        return NGX_OK;
+    }
+#endif
 
     if (ctx->entered_content_phase
         && r->connection->fd != (ngx_socket_t) -1)
@@ -2191,7 +2206,7 @@ ngx_http_lua_flush_pending_output(ngx_http_request_t *r,
         rc = ngx_http_lua_output_filter(r, NULL);
 
     } else {
-        cl = ngx_http_lua_get_flush_chain(r, ctx);
+        cl = ngx_http_lua_get_flush_chain(r);
         if (cl == NULL) {
             return NGX_ERROR;
         }
@@ -2775,6 +2790,14 @@ ngx_http_lua_handle_exit(lua_State *L, ngx_http_request_t *r,
     if (r->connection->fd == (ngx_socket_t) -1) {  /* fake request */
         return ctx->exit_code;
     }
+
+#if HAVE_LUA_PROXY_SSL
+    if (ctx->context == NGX_HTTP_LUA_CONTEXT_PROXY_SSL_CERT
+        || ctx->context == NGX_HTTP_LUA_CONTEXT_PROXY_SSL_VERIFY)
+    {
+        return ctx->exit_code;
+    }
+#endif
 
 #if 1
     if (!r->header_sent
@@ -4123,12 +4146,46 @@ void
 ngx_http_lua_finalize_request(ngx_http_request_t *r, ngx_int_t rc)
 {
     ngx_http_lua_ctx_t              *ctx;
+#if (NGX_HTTP_SSL)
+#if HAVE_LUA_PROXY_SSL
+    ngx_http_upstream_t             *u;
+    ngx_connection_t                *c;
+    ngx_http_lua_ssl_ctx_t          *cctx;
+#endif
+#endif
 
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     if (ctx && ctx->cur_co_ctx) {
         //执行 coctx->cleanup(coctx);
         ngx_http_lua_cleanup_pending_operation(ctx->cur_co_ctx);
     }
+
+#if (NGX_HTTP_SSL)
+#if HAVE_LUA_PROXY_SSL
+    u = r->upstream;
+    if (u) {
+        c = u->peer.connection;
+        if (c && c->ssl) {
+            cctx = ngx_http_lua_ssl_get_ctx(c->ssl->connection);
+            if (cctx && cctx->pool) {
+                if (rc == NGX_ERROR || rc >= NGX_HTTP_SPECIAL_RESPONSE) {
+                    cctx->exit_code = 0;
+                }
+
+                if (r->main->count > cctx->original_request_count) {
+                    r->main->count--;
+                    return;
+                }
+
+                ngx_destroy_pool(cctx->pool);
+                cctx->pool = NULL;
+
+                return;
+            }
+        }
+    }
+#endif
+#endif
 
     //正常的客户端请求
     if (r->connection->fd != (ngx_socket_t) -1) {
@@ -5123,7 +5180,7 @@ ngx_http_lua_ffi_bypass_if_checks(ngx_http_request_t *r)
 }
 
 
-#if (NGX_HTTP_V3)
+#if (HAVE_QUIC_SSL_LUA_YIELD_PATCH && NGX_HTTP_V3)
 void
 ngx_http_lua_resume_quic_ssl_handshake(ngx_connection_t *c)
 {

@@ -22,7 +22,6 @@ plan tests => repeat_each() * (blocks() * 7 - 4);
 $ENV{TEST_NGINX_HTML_DIR} ||= html_dir();
 $ENV{TEST_NGINX_MEMCACHED_PORT} ||= 11211;
 $ENV{TEST_NGINX_RESOLVER} ||= '8.8.8.8';
-$ENV{TEST_NGINX_SERVER_SSL_PORT} ||= 12345;
 $ENV{TEST_NGINX_CERT_DIR} ||= dirname(realpath(abs_path(__FILE__)));
 $ENV{TEST_NGINX_OPENRESTY_ORG_IP} ||= resolve("openresty.org", $ENV{TEST_NGINX_RESOLVER});
 
@@ -161,7 +160,7 @@ SSL reused session
 === TEST 2: no SNI, no verify
 --- http_config
     server {
-        listen $TEST_NGINX_SERVER_SSL_PORT ssl;
+        listen $TEST_NGINX_RAND_PORT_1 ssl;
         server_name   test.com;
         ssl_certificate ../html/test.crt;
         ssl_certificate_key ../html/test.key;
@@ -179,7 +178,7 @@ SSL reused session
             do
                 local sock = ngx.socket.tcp()
                 sock:settimeout(2000)
-                local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_SSL_PORT)
+                local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_RAND_PORT_1)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -326,11 +325,23 @@ SSL reused session
 
 
 === TEST 4: ssl session reuse
-access the public network is unstable, need a bigger timeout value.
---- quic_max_idle_timeout: 3
+--- http_config
+    server {
+        listen              $TEST_NGINX_RAND_PORT_1 ssl;
+        server_name         test.com;
+        ssl_certificate     $TEST_NGINX_CERT_DIR/cert/test.crt;
+        ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
+        ssl_protocols       TLSv1.2;
+        ssl_session_cache   shared:SSL:1m;
+
+        location / {
+            content_by_lua_block {
+                ngx.exit(200)
+            }
+        }
+    }
 --- config
     server_tokens off;
-    resolver $TEST_NGINX_RESOLVER ipv6=off;
     lua_ssl_protocols TLSv1.2;
     location /t {
         #set $port 5000;
@@ -344,7 +355,7 @@ access the public network is unstable, need a bigger timeout value.
 
             local session
             for i = 1, 2 do
-                local ok, err = sock:connect("agentzh.org", 443)
+                local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_RAND_PORT_1)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return
@@ -352,7 +363,7 @@ access the public network is unstable, need a bigger timeout value.
 
                 ngx.say("connected: ", ok)
 
-                session, err = sock:sslhandshake(session, "agentzh.org")
+                session, err = sock:sslhandshake(session, "test.com")
                 if not session then
                     ngx.say("failed to do SSL handshake: ", err)
                     return
@@ -360,7 +371,7 @@ access the public network is unstable, need a bigger timeout value.
 
                 ngx.say("ssl handshake: ", type(session))
 
-                local req = "GET / HTTP/1.1\\r\\nHost: agentzh.org\\r\\nConnection: close\\r\\n\\r\\n"
+                local req = "GET / HTTP/1.1\\r\\nHost: test.com\\r\\nConnection: close\\r\\n\\r\\n"
                 local bytes, err = sock:send(req)
                 if not bytes then
                     ngx.say("failed to send http request: ", err)
@@ -391,12 +402,12 @@ GET /t
 --- response_body
 connected: 1
 ssl handshake: cdata
-sent http request: 56 bytes.
+sent http request: 53 bytes.
 received: HTTP/1.1 200 OK
 close: 1 nil
 connected: 1
 ssl handshake: cdata
-sent http request: 56 bytes.
+sent http request: 53 bytes.
 received: HTTP/1.1 200 OK
 close: 1 nil
 
@@ -807,16 +818,15 @@ $::DSTRootCertificate"
 GET /t
 --- response_body eval
 qr{connected: 1
-failed to do SSL handshake: (22: certificate chain too long|20: unable to get local issuer certificate|21: unable to verify the first certificate)
+failed to do SSL handshake: (22: certificate chain too long|(?:2|20): unable to get (?:local )?issuer certificate|21: unable to verify the first certificate)
 failed to send http request: closed
 }
-
 --- log_level: debug
 --- grep_error_log eval: qr/lua ssl (?:set|save|free) session: [0-9A-F]+/
 --- grep_error_log_out
 --- error_log eval
 ['lua ssl server name: "openresty.org"',
-qr/lua ssl certificate verify error: \((22: certificate chain too long|20: unable to get local issuer certificate|21: unable to verify the first certificate)\)/]
+qr/lua ssl certificate verify error: \((22: certificate chain too long|(?:2|20): unable to get (?:local )?issuer certificate|21: unable to verify the first certificate)\)/]
 --- no_error_log
 SSL reused session
 [alert]
@@ -887,7 +897,7 @@ $::DSTRootCertificate"
 GET /t
 --- response_body eval
 qr/connected: 1
-failed to do SSL handshake: (22: certificate chain too long|20: unable to get local issuer certificate|21: unable to verify the first certificate)
+failed to do SSL handshake: (22: certificate chain too long|(?:2|20): unable to get (?:local )?issuer certificate|21: unable to verify the first certificate)
 failed to send http request: closed
 /
 
@@ -2951,7 +2961,7 @@ SSL reused session
 --- skip_openssl: 8: < 1.1.1
 --- http_config
     server {
-        listen              $TEST_NGINX_SERVER_SSL_PORT ssl;
+        listen              $TEST_NGINX_RAND_PORT_1 ssl;
         server_name         test.com;
         ssl_certificate     $TEST_NGINX_CERT_DIR/cert/test.crt;
         ssl_certificate_key $TEST_NGINX_CERT_DIR/cert/test.key;
@@ -2974,7 +2984,7 @@ SSL reused session
             sock:settimeout(2000)
 
             do
-                local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_SERVER_SSL_PORT)
+                local ok, err = sock:connect("127.0.0.1", $TEST_NGINX_RAND_PORT_1)
                 if not ok then
                     ngx.say("failed to connect: ", err)
                     return

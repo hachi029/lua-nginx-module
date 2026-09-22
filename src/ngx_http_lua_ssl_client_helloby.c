@@ -166,7 +166,7 @@ ngx_http_lua_ssl_client_hello_by_lua(ngx_conf_t *cf, ngx_command_t *cmd,
         }
 
         chunkname = ngx_http_lua_gen_chunk_name(cf, "ssl_client_hello_by_lua",
-                                          sizeof("ssl_client_hello_by_lua")- 1,
+                                          sizeof("ssl_client_hello_by_lua") - 1,
                                           &chunkname_len);
         if (chunkname == NULL) {
             return NGX_CONF_ERROR;
@@ -214,7 +214,7 @@ ngx_http_lua_ssl_client_hello_handler(ngx_ssl_conn_t *ssl_conn,
 
         if (cctx->done) {
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                           "lua_client_hello_by_lua: "
+                           "ssl_client_hello_by_lua: "
                            "client hello cb exit code: %d",
                            cctx->exit_code);
 
@@ -226,6 +226,19 @@ ngx_http_lua_ssl_client_hello_handler(ngx_ssl_conn_t *ssl_conn,
     }
 
     dd("first time");
+
+#if (nginx_version > 1029001)
+#ifdef SSL_CLIENT_HELLO_SUCCESS
+#if !defined freenginx
+    /* see commit 0373fe5d98c1515640 for more details */
+    rc = ngx_ssl_client_hello_callback(ssl_conn, al, arg);
+
+    if (rc == 0) {
+        return rc;
+    }
+#endif
+#endif
+#endif
 
 #if (nginx_version < 1017009)
     ngx_reusable_connection(c, 0);
@@ -317,7 +330,7 @@ ngx_http_lua_ssl_client_hello_handler(ngx_ssl_conn_t *ssl_conn,
         }
 
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "lua_client_hello_by_lua: handler return value: %i, "
+                       "ssl_client_hello_by_lua: handler return value: %i, "
                        "client hello cb exit code: %d", rc, cctx->exit_code);
 
         c->log->action = "SSL handshaking";
@@ -388,9 +401,11 @@ ngx_http_lua_ssl_client_hello_done(void *data)
 
     ngx_post_event(c->write, &ngx_posted_events);
 
-#if (NGX_HTTP_V3) && defined(SSL_ERROR_WANT_CLIENT_HELLO_CB)
-#   if (NGX_QUIC_OPENSSL_COMPAT)
+#if (HAVE_QUIC_SSL_LUA_YIELD_PATCH && NGX_HTTP_V3)
+#   if defined(SSL_ERROR_WANT_CLIENT_HELLO_CB)
+#       if (NGX_QUIC_OPENSSL_COMPAT || NGX_QUIC_OPENSSL_API)
     ngx_http_lua_resume_quic_ssl_handshake(c);
+#       endif
 #   endif
 #endif
 }
@@ -409,7 +424,7 @@ ngx_http_lua_ssl_client_hello_aborted(void *data)
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cctx->connection->log, 0,
-                   "lua_client_hello_by_lua: client hello cb aborted");
+                   "ssl_client_hello_by_lua: client hello cb aborted");
 
     cctx->aborted = 1;
     cctx->request->connection->ssl = NULL;
@@ -704,10 +719,14 @@ ngx_http_lua_ffi_ssl_get_client_hello_ext_present(ngx_http_request_t *r,
     }
 
     *extensions = ngx_palloc(r->connection->pool, sizeof(int) * ext_len);
-    if (*extensions != NULL) {
-        ngx_memcpy(*extensions, ext_out, sizeof(int) * ext_len);
-        *extensions_len = ext_len;
+    if (*extensions == NULL) {
+        OPENSSL_free(ext_out);
+        *err = "no memory";
+        return NGX_ERROR;
     }
+
+    ngx_memcpy(*extensions, ext_out, sizeof(int) * ext_len);
+    *extensions_len = ext_len;
 
     OPENSSL_free(ext_out);
     return NGX_OK;

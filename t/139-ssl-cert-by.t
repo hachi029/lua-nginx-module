@@ -12,7 +12,7 @@ if ($openssl_version =~ m/BoringSSL/) {
 }
 
 if ($openssl_version =~ m/built with OpenSSL (0|1\.0\.(?:0|1[^\d]|2[a-d]).*)/) {
-    plan(skip_all => "too old OpenSSL, need 1.0.2e, was $1");
+    plan(skip_all => "too old OpenSSL, need >= 1.0.2e, was $1");
 } else {
     plan tests => repeat_each() * (blocks() * 6 + 4);
 }
@@ -582,7 +582,7 @@ failed to do SSL handshake: handshake failed
 
 --- error_log eval
 [
-'lua_certificate_by_lua: handler return value: -1, cert cb exit code: 0',
+'ssl_certificate_by_lua: handler return value: -1, cert cb exit code: 0',
 qr/(\[info\] .*? SSL_do_handshake\(\) failed .*?cert cb error|routines:OPENSSL_internal:CERT_CB_ERROR)/,
 'lua exit with code -1',
 ]
@@ -723,7 +723,7 @@ failed to do SSL handshake: handshake failed
 
 --- error_log eval
 [
-'lua_certificate_by_lua: cert cb exit code: 0',
+'ssl_certificate_by_lua: cert cb exit code: 0',
 qr/(\[info\] .*? SSL_do_handshake\(\) failed .*?cert cb error|routines:OPENSSL_internal:CERT_CB_ERROR)/,
 'lua exit with code -1',
 ]
@@ -794,7 +794,7 @@ failed to do SSL handshake: handshake failed
 --- error_log eval
 [
 'runtime error: ssl_certificate_by_lua(nginx.conf:28):2: bad bad bad',
-'lua_certificate_by_lua: handler return value: 500, cert cb exit code: 0',
+'ssl_certificate_by_lua: handler return value: 500, cert cb exit code: 0',
 qr/(\[info\] .*? SSL_do_handshake\(\) failed .*?cert cb error|routines:OPENSSL_internal:CERT_CB_ERROR)/,
 qr/context: ssl_certificate_by_lua\*, client: \d+\.\d+\.\d+\.\d+, server: \d+\.\d+\.\d+\.\d+:\d+/,
 ]
@@ -866,7 +866,7 @@ failed to do SSL handshake: handshake failed
 --- error_log eval
 [
 'runtime error: ssl_certificate_by_lua(nginx.conf:28):3: bad bad bad',
-'lua_certificate_by_lua: cert cb exit code: 0',
+'ssl_certificate_by_lua: cert cb exit code: 0',
 qr/(\[info\] .*? SSL_do_handshake\(\) failed .*?cert cb error|routines:OPENSSL_internal:CERT_CB_ERROR)/,
 ]
 

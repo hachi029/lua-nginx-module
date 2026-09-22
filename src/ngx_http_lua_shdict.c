@@ -1519,6 +1519,11 @@ ngx_http_lua_ffi_shdict_store(ngx_shm_zone_t *zone, int op, u_char *key,
 
     dd("exptime: %ld", exptime);
 
+    if (key_len > 65535) {
+        *errmsg = "key too long";
+        return NGX_ERROR;
+    }
+
     ctx = zone->data;
 
     *forcible = 0;
@@ -1985,6 +1990,11 @@ ngx_http_lua_ffi_shdict_incr(ngx_shm_zone_t *zone, u_char *key,
     //初始的ttl
     if (init_ttl > 0) {
         tp = ngx_timeofday();
+    }
+
+    if (key_len > 65535) {
+        *err = "key too long";
+        return NGX_ERROR;
     }
 
     ctx = zone->data;

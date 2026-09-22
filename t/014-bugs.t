@@ -9,7 +9,7 @@ log_level('debug');
 repeat_each(3);
 
 # NB: the shutdown_error_log block is independent from repeat times
-plan tests => repeat_each() * (blocks() * 2 + 33) + 1;
+plan tests => repeat_each() * (blocks() * 2 + 41);
 
 our $HtmlDir = html_dir;
 #warn $html_dir;
@@ -107,19 +107,19 @@ GET /report/listBidwordPrices4lzExtra.htm?words=123,156,2532
         #echo $memc_value;
     }
     location = /echo {
-        echo_location '/memc?c=get&k=foo';
-        echo_location '/memc?c=set&k=foo&v=hello';
-        echo_location '/memc?c=get&k=foo';
+        echo_location '/memc?c=get&k=014-bugs-3';
+        echo_location '/memc?c=set&k=014-bugs-3&v=hello';
+        echo_location '/memc?c=get&k=014-bugs-3';
     }
     location = /main {
         content_by_lua '
-            local res = ngx.location.capture("/memc?c=get&k=foo&v=")
+            local res = ngx.location.capture("/memc?c=get&k=014-bugs-3&v=")
             ngx.say("1: ", res.body)
 
-            res = ngx.location.capture("/memc?c=set&k=foo&v=bar");
+            res = ngx.location.capture("/memc?c=set&k=014-bugs-3&v=bar");
             ngx.say("2: ", res.body);
 
-            res = ngx.location.capture("/memc?c=get&k=foo")
+            res = ngx.location.capture("/memc?c=get&k=014-bugs-3")
             ngx.say("3: ", res.body);
         ';
     }
@@ -872,16 +872,25 @@ ok
 
 === TEST 37: resolving names with a trailing dot
 --- http_config eval
-    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';"
+    "lua_package_path '$::HtmlDir/?.lua;./?.lua;;';
+    server {
+        listen 127.0.0.1:\$TEST_NGINX_RAND_PORT_1;
+
+        location = /t {
+            echo 'resolved trailing dot';
+        }
+    }
+"
 --- config
     location /t {
         resolver $TEST_NGINX_RESOLVER ipv6=off;
-        set $myhost 'agentzh.org.';
-        proxy_pass http://$myhost/misc/.vimrc;
+        set $myhost 'trailing-dot.test.';
+        proxy_pass http://$myhost:$TEST_NGINX_RAND_PORT_1/t;
     }
 --- request
 GET /t
---- response_body_like: An example for a vimrc file
+--- response_body
+resolved trailing dot
 --- no_error_log
 [error]
 --- timeout: 10
@@ -1269,6 +1278,8 @@ qr/\[emerg\] \d+#\d+: unexpected "A" in/
 
 
 === TEST 47: cosocket does not exit on worker_shutdown_timeout
+This test must enable master process
+--- SKIP
 --- main_config
 worker_shutdown_timeout 1;
 --- config
@@ -1316,7 +1327,6 @@ if ($ENV{TEST_NGINX_USE_HTTP3}) {
 
 $expr;
 --- timeout: 1.2
---- skip_eval: 2:$ENV{TEST_NGINX_USE_HTTP3}
 
 
 
@@ -1396,3 +1406,61 @@ If-Match: 1
 --- error_code: 200
 --- response_body eval
 qr/\Ahello\z/
+
+
+
+=== TEST 51: subrequest cycle problem in rewrite_by_lua_file
+--- http_config
+    lua_code_cache off;
+--- config
+    set $main "foo";
+    set $sub "bar";
+    location = /main {
+        rewrite_by_lua_file html/main.lua;
+        echo $main;
+    }
+
+    location = /sub {
+        rewrite_by_lua_file html/sub.lua;
+        echo $sub;
+    }
+--- user_files
+>>> main.lua
+local res = ngx.location.capture("/sub")
+ngx.var.main = "main " .. res.body
+>>> sub.lua
+ngx.var.sub = "sub"
+
+--- pipelined_requests eval
+["GET /sub", "GET /main"]
+--- response_body eval
+["sub\n", "main sub\n\n"]
+--- no_error_log
+[error]
+
+
+
+=== TEST 52: subrequest cycle problem in content_by_lua_file
+--- http_config
+    lua_code_cache off;
+--- config
+    location = /main {
+        content_by_lua_file html/main.lua;
+    }
+
+    location = /sub {
+        content_by_lua_file html/sub.lua;
+    }
+--- user_files
+>>> main.lua
+local res = ngx.location.capture("/sub")
+ngx.print("main " .. res.body)
+>>> sub.lua
+ngx.print("sub")
+
+--- pipelined_requests eval
+["GET /sub", "GET /main"]
+--- response_body eval
+["sub", "main sub"]
+--- no_error_log
+[error]

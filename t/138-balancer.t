@@ -583,6 +583,7 @@ upstream sent more data than specified in "Content-Length" header while reading 
     upstream backend {
         server 127.0.0.1:$TEST_NGINX_SERVER_PORT;
         balancer_by_lua_block {
+            collectgarbage("collect") -- deal with false positive leakage test
             local ffi = require "ffi"
             local C = ffi.C
 ffi.cdef[[
@@ -660,3 +661,81 @@ GET /t
 --- error_code: 200
 --- response_body
 hello world
+
+
+
+=== TEST 21: http2 upstream
+--- http_config
+    lua_package_path        "../lua-resty-core/lib/?.lua;;";
+    ssl_certificate     ../../cert/test.crt;
+    ssl_certificate_key ../../cert/test.key;
+    proxy_ssl_verify        off;
+
+    server {
+        listen 127.0.0.1:$TEST_NGINX_RAND_PORT_1 ssl;
+        http2 on;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("hello world: ", ngx.var.server_protocol)
+            }
+        }
+    }
+
+    upstream foo {
+        server 127.0.0.1:$TEST_NGINX_RAND_PORT_1 max_fails=0;
+    }
+--- config
+    location = /t {
+        proxy_http_version 2;
+        proxy_set_header Connection "";
+        proxy_pass https://foo;
+    }
+--- request
+GET /t
+--- error_code: 200
+--- response_body
+hello world: HTTP/2.0
+--- no_error_log
+[error]
+[crit]
+--- skip_nginx: 4: < 1.29.4
+
+
+
+=== TEST 22: upstream does not support http2
+--- http_config
+    lua_package_path    "../lua-resty-core/lib/?.lua;;";
+    ssl_certificate     ../../cert/test.crt;
+    ssl_certificate_key ../../cert/test.key;
+    proxy_ssl_verify    off;
+
+    server {
+        listen 127.0.0.1:$TEST_NGINX_RAND_PORT_1 ssl;
+
+        location / {
+            content_by_lua_block {
+                ngx.say("hello world: ", ngx.var.server_protocol)
+            }
+        }
+    }
+
+    upstream foo {
+        server 127.0.0.1:$TEST_NGINX_RAND_PORT_1 max_fails=0;
+    }
+--- config
+    location = /t {
+        proxy_http_version 2;
+        proxy_set_header Connection "";
+        proxy_pass https://foo;
+    }
+--- request
+GET /t
+--- error_code: 502
+--- response_body eval
+qr/502 Bad Gateway/
+--- no_error_log
+[crit]
+--- error_log eval
+qr/SSL_do_handshake.*(?:no application protocol|NO_APPLICATION_PROTOCOL).*alert number 120\) while SSL handshaking to upstream/
+--- skip_nginx: 4: < 1.29.4

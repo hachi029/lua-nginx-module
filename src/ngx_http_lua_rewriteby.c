@@ -75,11 +75,11 @@ ngx_http_lua_rewrite_handler(ngx_http_request_t *r)
             dd("swapping the contents of cur_ph and last_ph...");
 
             //tmp是当前的handler
-            tmp      = *cur_ph;
+            tmp = *cur_ph;
 
             //dst, source
-            memmove(cur_ph, cur_ph + 1,
-                    (last_ph - cur_ph) * sizeof (ngx_http_phase_handler_t));
+            ngx_memmove(cur_ph, cur_ph + 1,
+                        (last_ph - cur_ph) * sizeof(ngx_http_phase_handler_t));
 
             //*last_ph赋值为当前的handler
             *last_ph = tmp;
@@ -211,7 +211,11 @@ ngx_http_lua_rewrite_handler_inline(ngx_http_request_t *r)
     //获取 Lua VM
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
-    //进行 rewrite 阶段的 Lua code 的“载入”（从缓存里取或者调用 lua_loadbuffer 载入）
+    if (!llcf->enable_code_cache) {
+        llcf->rewrite_src_ref = LUA_REFNIL;
+    }
+
+    //进行 rewrite 阶段的 Lua code 的”载入”（从缓存里取或者调用 lua_loadbuffer 载入）
     /*  load Lua inline script (w/ cache) sp = 1 */
     rc = ngx_http_lua_cache_loadbuffer(r->connection->log, L,
                                        llcf->rewrite_src.value.data,
@@ -257,6 +261,10 @@ ngx_http_lua_rewrite_handler_file(ngx_http_request_t *r)
     }
 
     L = ngx_http_lua_get_lua_vm(r, NULL);
+
+    if (!llcf->enable_code_cache) {
+        llcf->rewrite_src_ref = LUA_REFNIL;
+    }
 
     /*  load Lua script file (w/ cache)        sp = 1 */
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L, script_path,

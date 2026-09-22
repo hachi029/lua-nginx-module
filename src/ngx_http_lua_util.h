@@ -36,12 +36,14 @@
 #define NGX_HTTP_LUA_CONTEXT_YIELDABLE (NGX_HTTP_LUA_CONTEXT_REWRITE         \
                                 | NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE        \
                                 | NGX_HTTP_LUA_CONTEXT_ACCESS                \
+                                | NGX_HTTP_LUA_CONTEXT_PRECONTENT            \
                                 | NGX_HTTP_LUA_CONTEXT_CONTENT               \
                                 | NGX_HTTP_LUA_CONTEXT_TIMER                 \
+                                | NGX_HTTP_LUA_CONTEXT_PROXY_SSL_CERT        \
+                                | NGX_HTTP_LUA_CONTEXT_PROXY_SSL_VERIFY      \
                                 | NGX_HTTP_LUA_CONTEXT_SSL_CLIENT_HELLO      \
                                 | NGX_HTTP_LUA_CONTEXT_SSL_CERT              \
                                 | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH)
-
 
 /**
  *  Lua request ctx data table
@@ -49,12 +51,12 @@
 /* key in Lua vm registry for all the "ngx.ctx" tables */
 #define ngx_http_lua_ctx_tables_key  "ngx_lua_ctx_tables"
 
-
 #define ngx_http_lua_context_name(c)                                         \
     ((c) == NGX_HTTP_LUA_CONTEXT_SET ? "set_by_lua*"                         \
      : (c) == NGX_HTTP_LUA_CONTEXT_REWRITE ? "rewrite_by_lua*"               \
      : (c) == NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE ? "server_rewrite_by_lua*" \
      : (c) == NGX_HTTP_LUA_CONTEXT_ACCESS ? "access_by_lua*"                 \
+     : (c) == NGX_HTTP_LUA_CONTEXT_PRECONTENT ? "precontent_by_lua*"         \
      : (c) == NGX_HTTP_LUA_CONTEXT_CONTENT ? "content_by_lua*"               \
      : (c) == NGX_HTTP_LUA_CONTEXT_LOG ? "log_by_lua*"                       \
      : (c) == NGX_HTTP_LUA_CONTEXT_HEADER_FILTER ? "header_filter_by_lua*"   \
@@ -63,6 +65,10 @@
      : (c) == NGX_HTTP_LUA_CONTEXT_INIT_WORKER ? "init_worker_by_lua*"       \
      : (c) == NGX_HTTP_LUA_CONTEXT_EXIT_WORKER ? "exit_worker_by_lua*"       \
      : (c) == NGX_HTTP_LUA_CONTEXT_BALANCER ? "balancer_by_lua*"             \
+     : (c) == NGX_HTTP_LUA_CONTEXT_PROXY_SSL_CERT ?                          \
+                                             "proxy_ssl_certificate_by_lua*" \
+     : (c) == NGX_HTTP_LUA_CONTEXT_PROXY_SSL_VERIFY ?                        \
+                                                 "proxy_ssl_verify_by_lua*"  \
      : (c) == NGX_HTTP_LUA_CONTEXT_SSL_CLIENT_HELLO ?                        \
                                                  "ssl_client_hello_by_lua*"  \
      : (c) == NGX_HTTP_LUA_CONTEXT_SSL_CERT ? "ssl_certificate_by_lua*"      \
@@ -71,7 +77,6 @@
      : (c) == NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH ?                          \
                                                  "ssl_session_fetch_by_lua*" \
      : "(unknown)")
-
 
 #define ngx_http_lua_check_context(L, ctx, flags)                            \
     if (!((ctx)->context & (flags))) {                                       \
@@ -275,7 +280,7 @@ ngx_addr_t *ngx_http_lua_parse_addr(lua_State *L, u_char *text, size_t len);
 
 size_t ngx_http_lua_escape_log(u_char *dst, u_char *src, size_t size);
 
-#if (NGX_HTTP_V3)
+#if (HAVE_QUIC_SSL_LUA_YIELD_PATCH && NGX_HTTP_V3)
 void ngx_http_lua_resume_quic_ssl_handshake(ngx_connection_t *c);
 #endif
 
@@ -546,17 +551,28 @@ ngx_http_lua_cleanup_pending_operation(ngx_http_lua_co_ctx_t *coctx)
  * 获取一个ngx_chain_t结构体，其buf的flush被置位
  */
 static ngx_inline ngx_chain_t *
-ngx_http_lua_get_flush_chain(ngx_http_request_t *r, ngx_http_lua_ctx_t *ctx)
+ngx_http_lua_get_flush_chain(ngx_http_request_t *r)
 {
     ngx_chain_t  *cl;
 
-    // 获取一个ngx_chain_t， 同时申请一个len大小的ngx_buf_t，挂载到ngx_chain_t上
-    cl = ngx_http_lua_chain_get_free_buf(r->connection->log, r->pool,
-                                         &ctx->free_bufs, 0);
+/*
+     * The flush buf is deliberately NOT taken from ctx->free_bufs and
+     * deliberately carries no tag. It is size 0 and ngx_buf_special(), so the
+     * write filter keeps it queued. If tagged, ngx_chain_update_chains() would
+     * return it to ctx->free_bufs, and reusing it from there memzeros the
+     * flush flag away, resulting in "zero size buf in writer t:1 r:0 f:0".
+     */
+    cl = ngx_alloc_chain_link(r->pool);
     if (cl == NULL) {
         return NULL;
     }
 
+cl->buf = ngx_calloc_buf(r->pool);
+    if (cl->buf == NULL) {
+        return NULL;
+    }
+
+    cl->next = NULL;
     //其flush置位为1
     cl->buf->flush = 1;
 

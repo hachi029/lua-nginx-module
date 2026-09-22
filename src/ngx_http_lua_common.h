@@ -24,6 +24,28 @@
 #include <lauxlib.h>
 
 
+
+#if (NGX_HTTP_SSL)
+/* introduce OPENSSL_IS_BORINGSSL and LIBRESSL_VERSION_NUMBER */
+#include <openssl/ssl.h>
+
+#ifdef HAVE_PROXY_SSL_PATCH
+
+#if defined(LIBRESSL_VERSION_NUMBER)
+#define HAVE_LUA_PROXY_SSL  0
+#elif defined(OPENSSL_IS_BORINGSSL)
+#define  HAVE_LUA_PROXY_SSL 0
+#elif defined(SSL_ERROR_WANT_RETRY_VERIFY) &&                                \
+    OPENSSL_VERSION_NUMBER >= 0x30000020uL
+#define  HAVE_LUA_PROXY_SSL 1
+#else
+#define  HAVE_LUA_PROXY_SSL 0
+#endif
+
+#endif /* HAVE_PROXY_SSL_PATCH */
+#endif /* NGX_HTTP_SSL */
+
+
 #if defined(NDK) && NDK
 #include <ndk.h>
 
@@ -132,24 +154,26 @@ typedef struct {
     (NGX_HTTP_LUA_FILE_TAG_LEN + 2 * MD5_DIGEST_LENGTH)
 
 
-/* must be within 16 bit */
-#define NGX_HTTP_LUA_CONTEXT_SET                0x0001
-#define NGX_HTTP_LUA_CONTEXT_REWRITE            0x0002
-#define NGX_HTTP_LUA_CONTEXT_ACCESS             0x0004
-#define NGX_HTTP_LUA_CONTEXT_CONTENT            0x0008
-#define NGX_HTTP_LUA_CONTEXT_LOG                0x0010
-#define NGX_HTTP_LUA_CONTEXT_HEADER_FILTER      0x0020
-#define NGX_HTTP_LUA_CONTEXT_BODY_FILTER        0x0040
-#define NGX_HTTP_LUA_CONTEXT_TIMER              0x0080
-#define NGX_HTTP_LUA_CONTEXT_INIT_WORKER        0x0100
-#define NGX_HTTP_LUA_CONTEXT_BALANCER           0x0200
-#define NGX_HTTP_LUA_CONTEXT_SSL_CERT           0x0400
-#define NGX_HTTP_LUA_CONTEXT_SSL_SESS_STORE     0x0800
-#define NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH     0x1000
-#define NGX_HTTP_LUA_CONTEXT_EXIT_WORKER        0x2000
-#define NGX_HTTP_LUA_CONTEXT_SSL_CLIENT_HELLO   0x4000
-#define NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE     0x8000
-
+/* must be within 32 bits */
+#define NGX_HTTP_LUA_CONTEXT_SET                0x00000001
+#define NGX_HTTP_LUA_CONTEXT_REWRITE            0x00000002
+#define NGX_HTTP_LUA_CONTEXT_ACCESS             0x00000004
+#define NGX_HTTP_LUA_CONTEXT_CONTENT            0x00000008
+#define NGX_HTTP_LUA_CONTEXT_LOG                0x00000010
+#define NGX_HTTP_LUA_CONTEXT_HEADER_FILTER      0x00000020
+#define NGX_HTTP_LUA_CONTEXT_BODY_FILTER        0x00000040
+#define NGX_HTTP_LUA_CONTEXT_TIMER              0x00000080
+#define NGX_HTTP_LUA_CONTEXT_INIT_WORKER        0x00000100
+#define NGX_HTTP_LUA_CONTEXT_BALANCER           0x00000200
+#define NGX_HTTP_LUA_CONTEXT_SSL_CERT           0x00000400
+#define NGX_HTTP_LUA_CONTEXT_SSL_SESS_STORE     0x00000800
+#define NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH     0x00001000
+#define NGX_HTTP_LUA_CONTEXT_EXIT_WORKER        0x00002000
+#define NGX_HTTP_LUA_CONTEXT_SSL_CLIENT_HELLO   0x00004000
+#define NGX_HTTP_LUA_CONTEXT_SERVER_REWRITE     0x00008000
+#define NGX_HTTP_LUA_CONTEXT_PROXY_SSL_VERIFY   0x00010000
+#define NGX_HTTP_LUA_CONTEXT_PRECONTENT         0x00020000
+#define NGX_HTTP_LUA_CONTEXT_PROXY_SSL_CERT     0x00040000
 
 #define NGX_HTTP_LUA_FFI_NO_REQ_CTX         -100
 #define NGX_HTTP_LUA_FFI_BAD_CONTEXT        -101
@@ -172,6 +196,8 @@ typedef struct ngx_http_lua_srv_conf_s  ngx_http_lua_srv_conf_t;
 
 typedef struct ngx_http_lua_main_conf_s  ngx_http_lua_main_conf_t;
 
+typedef struct ngx_http_lua_loc_conf_s  ngx_http_lua_loc_conf_t;
+
 typedef struct ngx_http_lua_header_val_s  ngx_http_lua_header_val_t;
 
 typedef struct ngx_http_lua_posted_thread_s  ngx_http_lua_posted_thread_t;
@@ -184,6 +210,9 @@ typedef ngx_int_t (*ngx_http_lua_main_conf_handler_pt)(ngx_log_t *log,
 
 typedef ngx_int_t (*ngx_http_lua_srv_conf_handler_pt)(ngx_http_request_t *r,
     ngx_http_lua_srv_conf_t *lscf, lua_State *L);
+
+typedef ngx_int_t (*ngx_http_lua_loc_conf_handler_pt)(ngx_http_request_t *r,
+    ngx_http_lua_loc_conf_t *llcf, lua_State *L);
 
 typedef ngx_int_t (*ngx_http_lua_set_header_pt)(ngx_http_request_t *r,
     ngx_http_lua_header_val_t *hv, ngx_str_t *value);
@@ -281,6 +310,7 @@ struct ngx_http_lua_main_conf_s {
     //配置指令值 access_by_lua_no_postpone， 默认值0
     //是否将本模块的access_handler放至所有access_handler的最后
     ngx_flag_t           postponed_to_access_phase_end;
+    ngx_flag_t           postponed_to_precontent_phase_end;
 
     // 为init_by_lua*的 cmd->post. ngx_http_lua_init_by_inline or ngx_http_lua_init_by_file 
     ngx_http_lua_main_conf_handler_pt    init_handler;
@@ -376,6 +406,7 @@ struct ngx_http_lua_main_conf_s {
     unsigned             requires_capture_log:1;
     //标识是否配置了server_rewrite_by_lua指令
     unsigned             requires_server_rewrite:1;
+    unsigned             requires_precontent:1;
 };
 
 
@@ -435,9 +466,9 @@ struct ngx_http_lua_srv_conf_s {
 
 /***
  * ngx_http_lua_loc_conf_t loc级别的配置结构体
- * 
+ *
  * */
-typedef struct {
+struct ngx_http_lua_loc_conf_s {
 #if (NGX_HTTP_SSL)
     ngx_ssl_t              *ssl;  /* shared by SSL cosockets */
     ngx_array_t            *ssl_certificates;
@@ -458,6 +489,22 @@ typedef struct {
     //配置指令 lua_ssl_conf_command 的值
     ngx_array_t            *ssl_conf_commands;
 #endif
+
+#if HAVE_LUA_PROXY_SSL
+    ngx_http_lua_loc_conf_handler_pt       proxy_ssl_cert_handler;
+    ngx_str_t                              proxy_ssl_cert_src;
+    u_char                                *proxy_ssl_cert_src_key;
+    u_char                                *proxy_ssl_cert_chunkname;
+    int                                    proxy_ssl_cert_src_ref;
+
+    ngx_http_lua_loc_conf_handler_pt       proxy_ssl_verify_handler;
+    ngx_str_t                              proxy_ssl_verify_src;
+    u_char                                *proxy_ssl_verify_src_key;
+    u_char                                *proxy_ssl_verify_chunkname;
+    int                                    proxy_ssl_verify_src_ref;
+    ngx_flag_t                             upstream_skip_openssl_default_verify;
+#endif
+
 #endif
 
     //lua_need_request_body 配置指令的标识。 是否强制读取request body
@@ -476,6 +523,7 @@ typedef struct {
     ngx_http_handler_pt     rewrite_handler;
     //llcf->access_handler = (ngx_http_handler_pt) cmd->post;
     ngx_http_handler_pt     access_handler;
+    ngx_http_handler_pt     precontent_handler;
     //llcf->content_handler = (ngx_http_handler_pt) cmd->post;
     ngx_http_handler_pt     content_handler;
     //llcf->log_handler = (ngx_http_handler_pt) cmd->post;
@@ -508,6 +556,15 @@ typedef struct {
     u_char                  *access_src_key; /* cached key for access_src */
     int                      access_src_ref;
 
+    u_char                  *precontent_chunkname;
+    ngx_http_complex_value_t precontent_src;    /*  precontent_by_lua
+                                                inline script/script
+                                                file path */
+
+    u_char                  *precontent_src_key; /* cached key for
+                                                    precontent_src */
+    int                      precontent_src_ref;
+
     u_char                  *content_chunkname;
     //inline script/script file path
     ngx_http_complex_value_t content_src;    /*  content_by_lua
@@ -515,8 +572,8 @@ typedef struct {
                                                 file path */
 
     //cached key
-    u_char                 *content_src_key; /* cached key for content_src */
-    int                     content_src_ref;
+    u_char                  *content_src_key; /* cached key for content_src */
+    int                      content_src_ref;
 
 
     u_char                      *log_chunkname;
@@ -566,7 +623,7 @@ typedef struct {
     //lua_use_default_type 配置指令标识, 默认为on
     //https://github.com/openresty/lua-nginx-module?tab=readme-ov-file#lua_use_default_type
     ngx_flag_t                       use_default_type;
-} ngx_http_lua_loc_conf_t;
+};
 
 
 typedef enum {
@@ -781,9 +838,9 @@ typedef struct ngx_http_lua_ctx_s {
     //ngx.thread.spawn()方法创建的uthreads总数
     int                      uthreads; /* number of active user threads */
 
-    //定义了16种context, 如 NGX_HTTP_LUA_CONTEXT_ACCESS
+//定义了16种context, 如 NGX_HTTP_LUA_CONTEXT_ACCESS
     //这个成员变量在各个 phase 的 Lua handler 内，Lua 代码执行之前被赋值
-    uint16_t                 context;   /* the current running directive context
+    uint32_t                 context;   /* the current running directive context
                                            (or running phase) for the current
                                            Lua chunk */
 
@@ -828,6 +885,7 @@ typedef struct ngx_http_lua_ctx_s {
     unsigned         entered_server_rewrite_phase:1;
     unsigned         entered_rewrite_phase:1;
     unsigned         entered_access_phase:1;
+    unsigned         entered_precontent_phase:1;
     //标识是否已经进入content阶段了。conetnt_by_lua* 的content_handler 中会将此值置1
     //标识conetnt_by_lua中的lua代码已经开始执行了
     unsigned         entered_content_phase:1;

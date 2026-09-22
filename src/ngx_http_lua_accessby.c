@@ -81,8 +81,8 @@ ngx_http_lua_access_handler(ngx_http_request_t *r)
             tmp = *cur_ph;
 
             //将当前handler移动到handlers数组的最后位置
-            memmove(cur_ph, cur_ph + 1,
-                    (last_ph - cur_ph) * sizeof (ngx_http_phase_handler_t));
+            ngx_memmove(cur_ph, cur_ph + 1,
+                        (last_ph - cur_ph) * sizeof(ngx_http_phase_handler_t));
 
             *last_ph = tmp;
 
@@ -213,6 +213,10 @@ ngx_http_lua_access_handler_inline(ngx_http_request_t *r)
     //获取主协程的lua_State结构体L
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
+    if (!llcf->enable_code_cache) {
+        llcf->access_src_ref = LUA_REFNIL;
+    }
+
     /*  load Lua inline script (w/ cache) sp = 1 */
     rc = ngx_http_lua_cache_loadbuffer(r->connection->log, L,
                                        llcf->access_src.value.data,
@@ -263,6 +267,10 @@ ngx_http_lua_access_handler_file(ngx_http_request_t *r)
 
     //获取lua_State
     L = ngx_http_lua_get_lua_vm(r, NULL);
+
+    if (!llcf->enable_code_cache) {
+        llcf->access_src_ref = LUA_REFNIL;
+    }
 
     /*  load Lua script file (w/ cache)        sp = 1 */
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L, script_path,

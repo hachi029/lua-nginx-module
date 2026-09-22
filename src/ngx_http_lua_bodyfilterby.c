@@ -186,6 +186,10 @@ ngx_http_lua_body_filter_inline(ngx_http_request_t *r, ngx_chain_t *in)
 
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
+    if (!llcf->enable_code_cache) {
+        llcf->body_filter_src_ref = LUA_REFNIL;
+    }
+
     /*  load Lua inline script (w/ cache) sp = 1 */
     rc = ngx_http_lua_cache_loadbuffer(r->connection->log, L,
                                        llcf->body_filter_src.value.data,
@@ -237,6 +241,10 @@ ngx_http_lua_body_filter_file(ngx_http_request_t *r, ngx_chain_t *in)
 
     L = ngx_http_lua_get_lua_vm(r, NULL);
 
+    if (!llcf->enable_code_cache) {
+        llcf->body_filter_src_ref = LUA_REFNIL;
+    }
+
     /*  load Lua script file (w/ cache)        sp = 1 */
     rc = ngx_http_lua_cache_loadfile(r->connection->log, L, script_path,
                                      &llcf->body_filter_src_ref,
@@ -268,7 +276,7 @@ ngx_http_lua_body_filter(ngx_http_request_t *r, ngx_chain_t *in)
     ngx_http_lua_loc_conf_t     *llcf;
     ngx_http_lua_ctx_t          *ctx;
     ngx_int_t                    rc;
-    uint16_t                     old_context;
+    uint32_t                     old_context;
     ngx_pool_cleanup_t          *cln;
     ngx_chain_t                 *out;
     ngx_chain_t                 *cl, *ln;

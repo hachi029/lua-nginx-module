@@ -38,7 +38,9 @@ static ngx_int_t ngx_http_lua_ssl_cert_by_chunk(lua_State *L,
     ngx_http_request_t *r);
 
 #ifndef OPENSSL_IS_BORINGSSL
+#if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER > 0x101010afL
 static int ngx_http_lua_is_grease_cipher(uint16_t cipher_id);
+#endif
 #endif
 
 
@@ -223,7 +225,7 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
 
         if (cctx->done) {
             ngx_log_debug1(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                           "lua_certificate_by_lua: cert cb exit code: %d",
+                           "ssl_certificate_by_lua: cert cb exit code: %d",
                            cctx->exit_code);
 
             dd("lua ssl cert done, finally");
@@ -325,7 +327,7 @@ ngx_http_lua_ssl_cert_handler(ngx_ssl_conn_t *ssl_conn, void *data)
         }
 
         ngx_log_debug2(NGX_LOG_DEBUG_HTTP, c->log, 0,
-                       "lua_certificate_by_lua: handler return value: %i, "
+                       "ssl_certificate_by_lua: handler return value: %i, "
                        "cert cb exit code: %d", rc, cctx->exit_code);
 
         c->log->action = "SSL handshaking";
@@ -396,9 +398,11 @@ ngx_http_lua_ssl_cert_done(void *data)
 
     ngx_post_event(c->write, &ngx_posted_events);
 
-#if (NGX_HTTP_V3) && OPENSSL_VERSION_NUMBER >= 0x1000205fL
-#   if (NGX_QUIC_OPENSSL_COMPAT)
+#if (HAVE_QUIC_SSL_LUA_YIELD_PATCH && NGX_HTTP_V3)
+#   if OPENSSL_VERSION_NUMBER >= 0x1000205fL
+#       if (NGX_QUIC_OPENSSL_COMPAT || NGX_QUIC_OPENSSL_API)
     ngx_http_lua_resume_quic_ssl_handshake(c);
+#       endif
 #   endif
 #endif
 }
@@ -409,7 +413,7 @@ ngx_http_lua_ssl_cert_aborted(void *data)
 {
     ngx_http_lua_ssl_ctx_t      *cctx = data;
 
-    dd("lua ssl cert done");
+    dd("lua ssl cert aborted");
 
     if (cctx->done) {
         /* completed successfully already */
@@ -417,7 +421,7 @@ ngx_http_lua_ssl_cert_aborted(void *data)
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, cctx->connection->log, 0,
-                   "lua_certificate_by_lua: cert cb aborted");
+                   "ssl_certificate_by_lua: cert cb aborted");
 
     cctx->aborted = 1;
     cctx->request->connection->ssl = NULL;
@@ -461,6 +465,7 @@ ngx_http_lua_log_ssl_cert_error(ngx_log_t *log, u_char *buf, size_t len)
 
 
 #ifndef OPENSSL_IS_BORINGSSL
+#if defined(OPENSSL_VERSION_NUMBER) && OPENSSL_VERSION_NUMBER > 0x101010afL
 static int
 ngx_http_lua_is_grease_cipher(uint16_t cipher_id)
 {
@@ -469,6 +474,7 @@ ngx_http_lua_is_grease_cipher(uint16_t cipher_id)
     /* Check if both bytes follow ?A pattern and high nibbles match */
     return (cipher_id & 0x0F0F) == 0x0A0A;
 }
+#endif
 #endif
 
 
@@ -868,7 +874,11 @@ ngx_http_lua_ffi_req_shared_ssl_ciphers(ngx_http_request_t *r,
     *err = "BoringSSL is not supported for SSL cipher operations";
     return NGX_ERROR;
 
+#elif OPENSSL_VERSION_NUMBER < 0x101010afL
+    *err = "OpenSSL < 1.1.1a is not supported for SSL cipher operations";
+    return NGX_ERROR;
 #else
+
     ngx_ssl_conn_t         *ssl_conn;
     STACK_OF(SSL_CIPHER)   *sk, *ck;
     int                     sn, cn, i, n;
@@ -1672,6 +1682,9 @@ ngx_http_lua_ffi_ssl_verify_client(ngx_http_request_t *r, void *client_certs,
 
             /* clean subject name list, and set it for send to client */
             SSL_set_client_CA_list(ssl_conn, name_chain);
+
+            /* ssl_conn now owns name_chain; avoid freeing it on error paths */
+            name_chain = NULL;
         }
 
         if (trusted_chain != NULL) {
@@ -1711,9 +1724,15 @@ failed:
 
 
 ngx_ssl_conn_t *
-ngx_http_lua_ffi_get_req_ssl_pointer(ngx_http_request_t *r)
+ngx_http_lua_ffi_get_req_ssl_pointer(ngx_http_request_t *r, const char **err)
 {
     if (r->connection == NULL || r->connection->ssl == NULL) {
+        *err = "bad request";
+        return NULL;
+    }
+
+    if (r->connection->ssl->connection == NULL) {
+        *err = "bad ssl connection";
         return NULL;
     }
 
@@ -1739,6 +1758,56 @@ ngx_http_lua_ffi_ssl_client_random(ngx_http_request_t *r,
     }
 
     *outlen = SSL_get_client_random(ssl_conn, out, *outlen);
+
+    return NGX_OK;
+}
+
+
+int
+ngx_http_lua_ffi_ssl_server_random(ngx_http_request_t *r,
+    unsigned char *out, size_t *outlen, char **err)
+{
+    ngx_ssl_conn_t          *ssl_conn;
+
+    if (r->connection == NULL || r->connection->ssl == NULL) {
+        *err = "bad request";
+        return NGX_ERROR;
+    }
+
+    ssl_conn = r->connection->ssl->connection;
+    if (ssl_conn == NULL) {
+        *err = "bad ssl conn";
+        return NGX_ERROR;
+    }
+
+    *outlen = SSL_get_server_random(ssl_conn, out, *outlen);
+
+    return NGX_OK;
+}
+
+
+int
+ngx_http_lua_ffi_ssl_session_master_key(ngx_http_request_t *r,
+    unsigned char *out, size_t *outlen, char **err)
+{
+    ngx_ssl_conn_t          *ssl_conn;
+    SSL_SESSION             *sess;
+
+    if (r->connection == NULL || r->connection->ssl == NULL) {
+        *err = "bad request";
+        return NGX_ERROR;
+    }
+
+    ssl_conn = r->connection->ssl->connection;
+    if (ssl_conn == NULL) {
+        *err = "bad ssl conn";
+        return NGX_ERROR;
+    }
+
+    sess = SSL_get0_session(ssl_conn);
+
+
+    *outlen = SSL_SESSION_get_master_key(sess, out, *outlen);
 
     return NGX_OK;
 }

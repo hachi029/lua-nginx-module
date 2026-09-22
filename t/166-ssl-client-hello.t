@@ -9,7 +9,7 @@ my $NginxBinary = $ENV{'TEST_NGINX_BINARY'} || 'nginx';
 my $openssl_version = eval { `$NginxBinary -V 2>&1` };
 
 if ($openssl_version =~ m/built with OpenSSL (0\S*|1\.0\S*|1\.1\.0\S*)/) {
-    plan(skip_all => "too old OpenSSL, need 1.1.1, was $1");
+    plan(skip_all => "too old OpenSSL, need >= 1.1.1, was $1");
 } elsif ($openssl_version =~ m/running with BoringSSL/) {
     plan(skip_all => "does not support BoringSSL");
 } elsif ($ENV{TEST_NGINX_USE_HTTP3}) {
@@ -583,7 +583,7 @@ failed to do SSL handshake: handshake failed
 
 --- error_log eval
 [
-'lua_client_hello_by_lua: handler return value: -1, client hello cb exit code: 0',
+'ssl_client_hello_by_lua: handler return value: -1, client hello cb exit code: 0',
 qr/\[info\] .*? SSL_do_handshake\(\) failed .*?callback failed/,
 'lua exit with code -1',
 ]
@@ -724,7 +724,7 @@ failed to do SSL handshake: handshake failed
 
 --- error_log eval
 [
-'lua_client_hello_by_lua: client hello cb exit code: 0',
+'ssl_client_hello_by_lua: client hello cb exit code: 0',
 qr/\[info\] .*? SSL_do_handshake\(\) failed .*?callback failed/,
 'lua exit with code -1',
 ]
@@ -795,7 +795,7 @@ failed to do SSL handshake: handshake failed
 --- error_log eval
 [
 'runtime error: ssl_client_hello_by_lua(nginx.conf:28):2: bad bad bad',
-'lua_client_hello_by_lua: handler return value: 500, client hello cb exit code: 0',
+'ssl_client_hello_by_lua: handler return value: 500, client hello cb exit code: 0',
 qr/\[info\] .*? SSL_do_handshake\(\) failed .*?callback failed/,
 qr/context: ssl_client_hello_by_lua\*, client: \d+\.\d+\.\d+\.\d+, server: \d+\.\d+\.\d+\.\d+:\d+/,
 ]
@@ -867,7 +867,7 @@ failed to do SSL handshake: handshake failed
 --- error_log eval
 [
 'runtime error: ssl_client_hello_by_lua(nginx.conf:28):3: bad bad bad',
-'lua_client_hello_by_lua: client hello cb exit code: 0',
+'ssl_client_hello_by_lua: client hello cb exit code: 0',
 qr/\[info\] .*? SSL_do_handshake\(\) failed .*?callback failed/,
 ]
 
@@ -2631,7 +2631,7 @@ ssl handshake: boolean
 
 --- error_log eval
 [
-'lua_client_hello_by_lua: handler return value: 0, client hello cb exit code: 1',
+'ssl_client_hello_by_lua: handler return value: 0, client hello cb exit code: 1',
 qr/\[debug\] .*? SSL_do_handshake: 1/,
 'lua exit with code 0',
 ]
@@ -3437,7 +3437,7 @@ qr/test completed/,
 GET /t
 --- ignore_response
 --- curl_error eval
-qr/Connection time/
+qr/Failed to connect to .* port .* after .* ms: Could not connect to server/
 --- grep_error_log eval: qr/(client hello: cosocket test start|client hello: received memc reply: VERSION|client hello: cosocket test done|cert by: test start)/
 --- grep_error_log_out eval
 [

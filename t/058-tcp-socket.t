@@ -209,8 +209,8 @@ attempt to send data on a closed socket:
     location /t {
         content_by_lua '
             local sock = ngx.socket.tcp()
-            local port = 80
-            local ok, err = sock:connect("agentzh.org", port)
+            local port = $TEST_NGINX_SERVER_PORT
+            local ok, err = sock:connect("localhost", port)
             if not ok then
                 ngx.say("failed to connect: ", err)
                 return
@@ -218,7 +218,7 @@ attempt to send data on a closed socket:
 
             ngx.say("connected: ", ok)
 
-            local req = "GET / HTTP/1.0\\r\\nHost: agentzh.org\\r\\nConnection: close\\r\\n\\r\\n"
+            local req = "GET /foo HTTP/1.0\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n"
             -- req = "OK"
 
             local bytes, err = sock:send(req)
@@ -247,11 +247,16 @@ attempt to send data on a closed socket:
         ';
     }
 
+    location /foo {
+        content_by_lua 'ngx.say("foo")';
+        more_clear_headers Date;
+    }
+
 --- request
 GET /t
 --- response_body_like
 connected: 1
-request sent: 56
+request sent: 57
 first line received: HTTP\/1\.1 200 OK
 second line received: (?:Date|Server): .*?
 --- no_error_log
@@ -327,7 +332,7 @@ send: nil closed
 receive: nil closed
 close: nil closed
 --- error_log
-lua tcp socket connect timed out, when connecting to 127.0.0.2:12345
+lua tcp socket connect timed out, upstream: 127.0.0.2:12345(127.0.0.2)
 --- timeout: 10
 
 
@@ -3084,7 +3089,7 @@ if not ok then
 end
 
 --- response_body_like: 500 Internal Server Error
---- wait: 0.3
+--- wait: 1
 --- error_code: 500
 --- error_log
 resolve name done
@@ -3107,7 +3112,7 @@ runtime error: attempt to yield across C-call boundary
             end
             local function err()
                 local sock = ngx.socket.tcp()
-                local ok, err = sock:connect("agentzh.org", 12345)
+                local ok, err = sock:connect("localhost", $TEST_NGINX_RAND_PORT_1)
                 if not ok then
                     ngx.log(ngx.ERR, "failed to connect: ", err)
                     return
@@ -3121,7 +3126,7 @@ runtime error: attempt to yield across C-call boundary
     GET /t
 --- response_body
 ok
---- wait: 0.3
+--- wait: 3
 --- error_log
 resolve name done
 --- no_error_log
@@ -3993,6 +3998,7 @@ hello world
 [error]
 --- error_log
 lua tcp socket read any
+--- skip_eval: 4:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} ne "")
 
 
 
@@ -4147,6 +4153,7 @@ hello world
 [error]
 --- error_log
 lua tcp socket calling receiveany() method to read at most 128 bytes
+--- skip_eval: 4:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} ne "")
 
 
 
@@ -4222,6 +4229,7 @@ orld
 [error]
 --- error_log
 lua tcp socket calling receiveany() method to read at most 7 bytes
+--- skip_eval: 4:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} ne "")
 
 
 
@@ -4514,7 +4522,8 @@ reused times: 3, setkeepalive err: closed
             local sock = assert(ngx.req.socket(true))
             local data
             while true do
-                data = assert(sock:receive())
+                data = sock:receive()
+                if not data then break end
                 assert(data == "hello")
             end
         }

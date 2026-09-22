@@ -327,7 +327,7 @@ failed:
 
     rc->err.len = ngx_snprintf(rc->err.data, rc->err.len, p, &rc->pattern, n)
                   - rc->err.data;
-    return NGX_OK;
+    return NGX_ERROR;
 }
 #endif
 
@@ -515,6 +515,11 @@ ngx_http_lua_regex_cleanup(void *data)
 
     if (ngx_regex_compile_context) {
         old_pool = ngx_http_lua_pcre_malloc_init(NULL);
+        if (ngx_regex_match_context != NULL) {
+            pcre2_match_context_free(ngx_regex_match_context);
+            ngx_regex_match_context = NULL;
+        }
+
         pcre2_compile_context_free(ngx_regex_compile_context);
         ngx_regex_compile_context = NULL;
         ngx_http_lua_pcre_malloc_done(old_pool);

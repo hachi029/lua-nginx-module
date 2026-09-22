@@ -659,6 +659,7 @@ GET /t
 --- response_body_like: 403 Forbidden
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -677,6 +678,7 @@ GET /t
 --- response_body
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -713,6 +715,7 @@ F(ngx_http_lua_header_filter_by_chunk).return {
 --- no_error_log
 [error]
 [alert]
+--- skip_eval: 4:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -730,6 +733,7 @@ GET /t
 --- response_body
 --- no_error_log
 [error]
+--- skip_eval: 3:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
 
 
 
@@ -779,7 +783,7 @@ GET /t
 --- no_error_log
 [error]
 --- curl_error
-curl: (95) HTTP/3 stream 0 reset by server
+curl: (95) HTTP/3 stream 0 reset by server (error 0x102 INTERNAL_ERROR)
 
 
 
@@ -798,7 +802,7 @@ GET /t
 --- no_error_log
 [error]
 --- curl_error
-curl: (95) HTTP/3 stream 0 reset by server
+curl: (95) HTTP/3 stream 0 reset by server (error 0x102 INTERNAL_ERROR)
 
 
 

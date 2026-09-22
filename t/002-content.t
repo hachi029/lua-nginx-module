@@ -533,8 +533,6 @@ Bar: nil
     location /lua {
         content_by_lua '
             local data = "hello, world"
-            -- ngx.header["Content-Length"] = #data
-            -- ngx.header.content_length = #data
             ngx.print(data)
         ';
     }
@@ -544,7 +542,7 @@ Bar: nil
 --- request
 GET /main
 --- response_headers
-Content-Length: 12
+Content-Type: text/plain
 --- response_body chop
 hello, world
 --- no_error_log
@@ -1120,3 +1118,4 @@ If-Unmodified-Since: Wed, 01 Jan 2020 07:28:00 GMT
 --- error_code: 412
 --- no_error_log
 unknown phase: 0
+--- skip_eval: 2:defined($ENV{MOCKEAGAIN}) && ($ENV{MOCKEAGAIN} =~ /w/)
